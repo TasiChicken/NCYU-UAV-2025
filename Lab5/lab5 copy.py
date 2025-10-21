@@ -16,7 +16,7 @@ def main():
     yaw_pid.initialize()
     ud_pid.initialize()
     fb_pid.initialize()
-    aruco_dict = cv2.aruco.Dictionary_get(cv2.aruco.DICT_6X6_250)
+    aruco_dict = cv2.aruco.Dictionary_get(cv2.aruco.DICT_4X4_50)
     aruco_params = cv2.aruco.DetectorParameters_create()
     marker_size = 15
     fs = cv2.FileStorage("calib_tello.xml", cv2.FILE_STORAGE_READ)
@@ -31,8 +31,8 @@ def main():
         if ids is not None:
             cv2.aruco.drawDetectedMarkers(frame, corners, ids)
             rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(corners, marker_size, camera_matrix, dist_coeffs)
-            #for i in range(len(ids)):
-                #cv2.aruco.drawAxis(frame, camera_matrix, dist_coeffs, rvecs[i], tvecs[i], 10)
+            for i in range(len(ids)):
+                cv2.aruco.drawAxis(frame, camera_matrix, dist_coeffs, rvecs[i], tvecs[i], 10)
             rvec, tvec = rvecs[0][0], tvecs[0][0]
             x, y, z = tvec[0], tvec[1], tvec[2]
             distance = math.sqrt(x**2 + y**2 + z**2)
