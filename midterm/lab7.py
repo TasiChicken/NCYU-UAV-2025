@@ -190,7 +190,7 @@ class Context:
 class DroneFSM:
     def __init__(self, ctx: Context):
         self.ctx = ctx
-        self.state = State.FOLLOW_MARKER_ID  # ★ 直接從第一步開始（模擬/地面也跑）
+        self.state = State.ASCEND_SEARCH  # ★ 直接從第一步開始（模擬/地面也跑）
         self.strafe_t0 = None
         self.done_t0 = None          # DONE 用的計時器
         self.handlers = {
@@ -325,54 +325,56 @@ class DroneFSM:
         # 依你的約定 ud<0 上升
         self.send_rc(0, 0, ctx.params["ASCENT_SPEED"], 0)
         return State.ASCEND_SEARCH
+    
     def handle_CENTER_ONE(self, ctx):
         frame = ctx.frame_read.frame
         cv2.putText(frame, "CENTER_ONE", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,255), 2)
-
-        ids = ctx.last_ids
-        if ids is None:
-            return State.ASCEND_SEARCH
-        
-        #if seen both
-        if ctx.params["ID1"] in ctx.last_poses and ctx.params["ID2"] in ctx.last_poses:
-            return State.DECIDE_TARGET
-        #if seen one, center on it
-        vis_ids = [i for i in [ctx.params["ID1"], ctx.params["ID2"]] if i in ctx.last_poses]
-        tid = vis_ids[0]
-        rvec, tvec = ctx.last_poses[tid]
-        x, y, z = tvec[0][0], tvec[1][0], tvec[2][0]
-        lr = ctx.pid_lr.update(x, 0.0)
-        ud = ctx.pid_ud.update(y, 0.0)
-        self.send_rc(lr, 0, -ud, 0)
-        #check if centered
-        if abs(x) < ctx.params["CENTER_X_TOL"] and abs(y) < ctx.params["CENTER_Y_TOL"]:
-            return State.SCAN_SECOND
-        return State.CENTER_ONE
+        try:
+            ids = ctx.last_ids 
+            #if seen both
+            if ctx.params["ID1"] in ctx.last_poses and ctx.params["ID2"] in ctx.last_poses:
+                return State.DECIDE_TARGET
+            #if seen one, center on it
+            vis_ids = [i for i in [ctx.params["ID1"], ctx.params["ID2"]] if i in ctx.last_poses]
+            tid = vis_ids[0]
+            rvec, tvec = ctx.last_poses[tid]
+            x, y, z = tvec[0][0], tvec[1][0], tvec[2][0]
+            lr = ctx.pid_lr.update(x, 0.0)
+            ud = ctx.pid_ud.update(y, 0.0)
+            self.send_rc(lr, 0, -ud, 0)
+            #check if centered
+            if abs(x) < ctx.params["CENTER_X_TOL"] and abs(y) < ctx.params["CENTER_Y_TOL"]:
+                return State.SCAN_SECOND
+            return State.CENTER_ONE
+        except KeyError:
+            self.send_rc(0, 0, 0, 0)
+            return State.CENTER_ONE
     
     def handle_SCAN_SECOND(self, ctx):
+        
         frame = ctx.frame_read.frame
         cv2.putText(frame, "SCAN_SECOND", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,255), 2)
-
-        ids = ctx.last_ids
-        if ids is None:
-            return State.ASCEND_SEARCH
-        
-        #if seen both
-        if ctx.params["ID1"] in ctx.last_poses and ctx.params["ID2"] in ctx.last_poses:
-            self.strafe_t0 = None #reset strafe timer
-            return State.DECIDE_TARGET
-        
-        # go left and go right to scan
-        v = ctx.params["STRAFE_RC"]
-        phase = ctx.params["PHASE"]
-        sign = 1 if phase % 2 == 0 else -1
-        self.send_rc(sign * v, 0, 0, 0)  
-        if self.strafe_t0 is None:
-            self.strafe_t0 = time.time()
-        if time.time() - self.strafe_t0 > ctx.params["STRAFE_TIME_SCAN"]:
-            ctx.params["PHASE"] += 1 
-            self.strafe_t0 = time.time()
-        return State.SCAN_SECOND
+        try:
+            ids = ctx.last_ids       
+            #if seen both
+            if ctx.params["ID1"] in ctx.last_poses and ctx.params["ID2"] in ctx.last_poses:
+                self.strafe_t0 = None #reset strafe timer
+                return State.DECIDE_TARGET
+            
+            # go left and go right to scan
+            v = ctx.params["STRAFE_RC"]
+            phase = ctx.params["PHASE"]
+            sign = 1 if phase % 2 == 0 else -1
+            self.send_rc(sign * v, 0, 0, 0)  
+            if self.strafe_t0 is None:
+                self.strafe_t0 = time.time()
+            if time.time() - self.strafe_t0 > ctx.params["STRAFE_TIME_SCAN"]:
+                ctx.params["PHASE"] += 1 
+                self.strafe_t0 = time.time()
+            return State.SCAN_SECOND
+        except KeyError:
+            self.send_rc(0, 0, 0, 0)
+            return State.SCAN_SECOND
     
     def handle_DECIDE_TARGET(self, ctx):
         frame = ctx.frame_read.frame
@@ -381,14 +383,9 @@ class DroneFSM:
         poses = ctx.last_poses
         id1_in = ctx.params["ID1"] in poses
         id2_in = ctx.params["ID2"] in poses
-        if not (id1_in and id2_in):
-            return State.ASCEND_SEARCH
-
         # 1) 選較遠的目標
         self.ids_candidates = [ctx.params["ID1"], ctx.params["ID2"]]
         target_id = self._pick_farther_id(poses)
-        if target_id is None:
-            return State.ASCEND_SEARCH
 
         ctx.params["TARGET_ID"] = target_id
 
@@ -407,52 +404,57 @@ class DroneFSM:
         cv2.putText(frame, "CENTER_ON_TARGET", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,255), 2)
 
         target_id = ctx.params["TARGET_ID"]
-        if target_id not in ctx.last_poses:
-            return State.ASCEND_SEARCH
+        # if target_id not in ctx.last_poses:
+        #     return State.ASCEND_SEARCH
+        try:
+            rvec, tvec = ctx.last_poses[target_id]
+            x, y, z = tvec[0][0], tvec[1][0], tvec[2][0]
+            lr = ctx.pid_lr.update(x, 0.0)
+            ud = ctx.pid_ud.update(y, 0.0)
+            fb = ctx.pid_fb.update(z - ctx.params["TARGET_Z"], sleep=0.0)
+            self.send_rc(lr, fb, -ud, 0)
+            #check if centered
+            if abs(x) < ctx.params["CENTER_X_TOL"] and abs(y) < ctx.params["CENTER_Y_TOL"] and abs(z - ctx.params["TARGET_Z"]) < ctx.params["Z_TOL"]:
+                self.reset_pids()
+                return State.FORWARD_TO_TARGET
+            return State.CENTER_ON_TARGET
+        except KeyError:
+            self.send_rc(0, 0, 0, 0)
+            return State.CENTER_ON_TARGET
 
-        rvec, tvec = ctx.last_poses[target_id]
-        x, y, z = tvec[0][0], tvec[1][0], tvec[2][0]
-        lr = ctx.pid_lr.update(x, 0.0)
-        ud = ctx.pid_ud.update(y, 0.0)
-        fb = ctx.pid_fb.update(z - ctx.params["TARGET_Z"], sleep=0.0)
-        self.send_rc(lr, fb, -ud, 0)
-        #check if centered
-        if abs(x) < ctx.params["CENTER_X_TOL"] and abs(y) < ctx.params["CENTER_Y_TOL"] and abs(z - ctx.params["TARGET_Z"]) < ctx.params["Z_TOL"]:
-            self.reset_pids()
-            return State.FORWARD_TO_TARGET
-        return State.CENTER_ON_TARGET
     
     def handle_FORWARD_TO_TARGET(self, ctx):
         frame = ctx.frame_read.frame
         cv2.putText(frame, "FORWARD_TO_TARGET", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,255), 2)
-
-        target_id = ctx.params["TARGET_ID"]
-        if target_id not in ctx.last_poses: #go too far, lost target, still go opposite
-            return State.STRAFE_OPPOSITE
-
-        rvec, tvec = ctx.last_poses[target_id]
-        z = tvec[2][0]
-        fb = ctx.pid_fb.update(z - 20.0, sleep=0.0)     # move to 20cm in front of marker
-        self.send_rc(0, fb, 0, 0)
-        #check if close enough
-        if z < 45.0:
-            self.reset_pids()
-            return State.STRAFE_OPPOSITE
-        return State.FORWARD_TO_TARGET
+        try:
+            target_id = ctx.params["TARGET_ID"]
+            rvec, tvec = ctx.last_poses[target_id]
+            z = tvec[2][0]
+            fb = ctx.pid_fb.update(z - 40.0, sleep=0.0)     # move to 40cm in front of marker
+            self.send_rc(0, fb, 0, 0)
+            #check if close enough
+            if z < 45.0:
+                self.reset_pids()
+                return State.STRAFE_OPPOSITE
+            return State.FORWARD_TO_TARGET
+        except KeyError:
+            self.send_rc(0, 0, 0, 0)
+            return State.FORWARD_TO_TARGET
     
     def handle_STRAFE_OPPOSITE(self, ctx):
         frame = ctx.frame_read.frame
         cv2.putText(frame, "STRAFE_OPPOSITE", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,255), 2)
 
-        if self.strafe_t0 is None:
-            self.strafe_t0 = time.time()
-
-        direction_sign = ctx.params["OPPOSITE_STRAFE_SIGN"]
-        self.send_rc(-direction_sign * 35, 0, 0, 0)
-        if time.time() - self.strafe_t0 > 2.2:
-            self.strafe_t0 = None
-            return State.CREEP_FORWARD
-        return State.STRAFE_OPPOSITE
+        try:
+            direction_sign = ctx.params["OPPOSITE_STRAFE_SIGN"]
+            self.send_rc(-direction_sign * 35, 0, 0, 0)
+            if time.time() - self.strafe_t0 > 2.2:
+                self.strafe_t0 = None
+                return State.CREEP_FORWARD
+            return State.STRAFE_OPPOSITE
+        except KeyError:
+            self.send_rc(0, 0, 0, 0)
+            return State.STRAFE_OPPOSITE
     
     def handle_CREEP_FORWARD(self, ctx):
         frame = ctx.frame_read.frame
