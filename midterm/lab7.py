@@ -176,7 +176,6 @@ class Context:
 
         # following
         "FOLLOW_ID": 1,             # 要跟隨的 marker
-        "SEARCH_FORWARD_SPEED": 10,  # 看不到 marker 時的前進速度
         "YAW_KP": 0.6,               # 偏航角度(度) → RC yaw 速度的比例
         "YAW_TOL_DEG": 5.0,          # 視為已垂直的角度公差
 
@@ -495,8 +494,6 @@ class DroneFSM:
         if tid not in poses:
             # 看不到兩者：維持「緩慢前進」以便重新遇到目標
             self._follow_stable = 0
-            fwd_speed = int(ctx.params.get("SEARCH_FORWARD_SPEED", 10))
-            self.send_rc(0, fwd_speed, 0, 0)
             return State.FOLLOW_MARKER_ID
 
         # 下面依 lab6 風格做 PID + 角度校正
