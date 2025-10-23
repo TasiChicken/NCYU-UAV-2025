@@ -122,21 +122,23 @@ class MarkerDetector:
         return ids, poses
 
 class State(enum.Enum):
-    ASCEND_SEARCH      = enum.auto()
-    CENTER_ONE         = enum.auto()
-    SCAN_SECOND        = enum.auto()
-    DECIDE_TARGET      = enum.auto()
-    CENTER_ON_TARGET   = enum.auto()
-    FORWARD_TO_TARGET  = enum.auto()
-    STRAFE_OPPOSITE    = enum.auto()
-    CREEP_FORWARD      = enum.auto()
+    ASCEND_SEARCH        = enum.auto()
+    CENTER_ONE           = enum.auto()
+    SCAN_SECOND          = enum.auto()
+    DECIDE_TARGET        = enum.auto()
+    CENTER_ON_TARGET     = enum.auto()
+    FORWARD_TO_TARGET    = enum.auto()
+    STRAFE_OPPOSITE      = enum.auto()
+    CREEP_FORWARD        = enum.auto()
+    DONE                 = enum.auto()
 
-    DONE               = enum.auto()
     FOLLOW_MARKER_ID     = enum.auto() 
     PASS_UNDER_TABLE_3   = enum.auto() 
     ROTATE_RIGHT_90      = enum.auto() 
     ASCEND_LOCK_4        = enum.auto() 
     OVERBOARD_TO_FIND_5  = enum.auto() 
+
+    ALIGN_Y5_FLIP_LAND   = enum.auto()
 
 @dataclass
 class Context:
@@ -184,7 +186,10 @@ class Context:
         "ROTATE_DEG": 90,           # 右轉角度
         "OVERBOARD_LR": -15,        # 往左水平移動的 rc 速度
         "OVERBOARD_UD": +8,         # 往上微升的 rc 速度
-        "TRACK_STABLE_N": 5,        # 連續幀數達標才視為穩定       
+        "TRACK_STABLE_N": 5,        # 連續幀數達標才視為穩定  
+
+        "MARKER5_TARGET_Y": 0.0,   # 期望的相機座標系 y 距離（單位同 tvec，通常是 cm）
+        "Y_TOL": 5.0,              # y 距離容許誤差（cm）     
     })
 
 class DroneFSM:
@@ -192,7 +197,6 @@ class DroneFSM:
         self.ctx = ctx
         self.state = State.FOLLOW_MARKER_ID  # ★ 直接從第一步開始（模擬/地面也跑）
         self.strafe_t0 = None
-        self.done_t0 = None          # DONE 用的計時器
         self.handlers = {
             
             State.ASCEND_SEARCH      : self.handle_ASCEND_SEARCH,
@@ -209,6 +213,8 @@ class DroneFSM:
             State.ROTATE_RIGHT_90:        self.handle_ROTATE_RIGHT_90,
             State.ASCEND_LOCK_4:          self.handle_ASCEND_LOCK_4,
             State.OVERBOARD_TO_FIND_5:    self.handle_OVERBOARD_TO_FIND_5,
+
+            State.ALIGN_Y5_FLIP_LAND:     self.handle_ALIGN_Y5_FLIP_LAND,
 
             State.DONE:            self.handle_DONE,
         }
@@ -577,6 +583,71 @@ class DroneFSM:
         """
         return State.OVERBOARD_TO_FIND_5
 
+    # === [CHANGED] 新增：對齊到距離 marker 5 的 Y，翻滾後降落 ===
+    def handle_ALIGN_Y5_FLIP_LAND(self, ctx: Context) -> State:
+        frame = ctx.frame_read.frame
+        cv2.putText(frame, "ALIGN_Y5_FLIP_LAND", (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,255), 2)
+
+        m5 = int(ctx.params.get("MARKER_5", 5))
+        poses = ctx.last_poses or {}
+
+        # 初始化穩定幀計數
+        if not hasattr(self, "_y5_stable"):
+            self._y5_stable = 0
+
+        # 沒看到 marker 5：保持懸停（或可依需求微調前進/上升）
+        if m5 not in poses:
+            self._y5_stable = 0
+            self.hover()
+            return State.ALIGN_Y5_FLIP_LAND
+
+        # 讀取 y 距離並與目標比較（OpenCV 相機座標：y 往下為正）
+        rvec, tvec = poses[m5]
+        y_cur = float(tvec[1][0])                       # 目前相機座標系下的 y（cm）
+        y_set = float(ctx.params["MARKER5_TARGET_Y"])   # 期望 y（cm）
+        err_y = y_cur - y_set                           # 正值→需要向上或向下：交給 PID 決定
+
+        # 只調整上下（ud），其餘維持 0；你也可加上 x/z 保持對齊，這裡依需求最小化
+        ud = int(ctx.pid_ud.update(err_y, sleep=0.0))
+        ud = self.clip(ud)
+        self.send_rc(0, 0, -ud, 0)   # 注意你的慣例：RC 要送 -ud
+
+        # 判斷是否到目標 y（用 Y_TOL，並可疊加 TRACK_STABLE_N 框定）
+        y_tol = float(ctx.params.get("Y_TOL", 5.0))
+        if abs(err_y) <= y_tol:
+            self._y5_stable += 1
+        else:
+            self._y5_stable = 0
+
+        if self._y5_stable >= int(ctx.params.get("TRACK_STABLE_N", 3)):
+            # 對齊完成：停止，翻滾一次，然後降落
+            self.hover()
+            self._y5_stable = 0
+            self.reset_pids()
+
+            # 翻滾（模擬模式只記錄文字；真機則呼叫 flip）
+            if ctx.simulation or not ctx.airborne:
+                self._record_cmd("[SIM MOVE] flip forward")
+            else:
+                try:
+                    ctx.drone.flip('f')   # 'f','b','l','r' 依需求可改
+                except Exception as e:
+                    print("flip failed:", e)
+
+            # 降落
+            if ctx.simulation or not ctx.airborne:
+                self._record_cmd("[SIM MOVE] land")
+            else:
+                try:
+                    ctx.drone.land()
+                    ctx.airborne = False
+                except Exception as e:
+                    print("land failed:", e)
+
+            return State.DONE
+
+        return State.ALIGN_Y5_FLIP_LAND
 
     def handle_DONE(self, ctx: Context) -> State:  # move forward and land
         return State.DONE
