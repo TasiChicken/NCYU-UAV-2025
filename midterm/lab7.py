@@ -467,8 +467,8 @@ class DroneFSM:
 
     def handle_FOLLOW_MARKER_ID(self, ctx: Context) -> State:
         """
-        跟隨指定 ID，並在看見 marker 時同時做中心對齊 (x,y)、距離對齊 (z)，
-        並以 yaw 校正讓機頭轉到與 marker 垂直。
+        跟隨指定 ID；若『看不到 FOLLOW_ID、但看到 MARKER_3』→ 立刻轉入 PASS_UNDER_TABLE_3。
+        其他時候依 lab6 風格：x/y/z 用 PID，角度用 calculate_marker_angle 校正旋轉。
         """
         tid = ctx.params["FOLLOW_ID"]
 
@@ -477,21 +477,23 @@ class DroneFSM:
 
         poses = getattr(ctx, "last_poses", {}) or {}
 
-        # === [CHANGED] 新增：提前取出 MARKER_3 id（若未在 params 內，預設 3） ===
+        # === [CHANGED] 先抓 marker3 id（預設 3）
         marker3 = int(ctx.params.get("MARKER_3", 3))  # === [CHANGED] ===
 
+        # === [CHANGED] 分支順序改為：若「看不到 FOLLOW_ID 且 看得到 MARKER_3」→ 直接切狀態
+        if tid not in poses and marker3 in poses:      # === [CHANGED] ===
+            self._follow_stable = 0                    # === [CHANGED] ===
+            self.hover()                               # === [CHANGED] ===
+            return State.PASS_UNDER_TABLE_3            # === [CHANGED] ===
+
         if tid not in poses:
-            # === [CHANGED] 若看不到 FOLLOW_ID，但看得到 MARKER_3，直接切換狀態 ===
-            if marker3 in poses:                                # === [CHANGED] ===
-                self._follow_stable = 0                         # === [CHANGED] ===
-                self.hover()                                    # === [CHANGED] ===
-                return State.PASS_UNDER_TABLE_3                 # === [CHANGED] ===
-            # === [CHANGED] 否則維持原本「緩慢前進」行為 ===
+            # 看不到兩者：維持「緩慢前進」以便重新遇到目標
             self._follow_stable = 0
             fwd_speed = int(ctx.params.get("SEARCH_FORWARD_SPEED", 10))
             self.send_rc(0, fwd_speed, 0, 0)
             return State.FOLLOW_MARKER_ID
 
+        # 下面依 lab6 風格做 PID + 角度校正
         rvec, tvec = poses[tid]
         x = float(tvec[0][0])
         y = float(tvec[1][0])
@@ -501,28 +503,31 @@ class DroneFSM:
         err_y = y
         err_z = z - ctx.params["TARGET_Z"]
 
-        lr = int(self.pid_lr.update(err_x, sleep=0.0))
-        ud = int(self.pid_ud.update(err_y, sleep=0.0))
-        fb = int(self.pid_fb.update(err_z, sleep=0.0))
+        # 與 lab6 一致：x→lr, y→ud, z→fb
+        lr = int(ctx.pid_lr.update(err_x, sleep=0.0))
+        ud = int(ctx.pid_ud.update(err_y, sleep=0.0))
+        fb = int(ctx.pid_fb.update(err_z, sleep=0.0))
 
-        # === [CHANGED] 由 rvec 推回偏航角誤差 → 轉成 yaw 速度（保持原本邏輯） ===
-        yaw_err_deg = self._marker_yaw_error_deg_from_rvec(rvec)
-        yaw_kp = float(ctx.params.get("YAW_KP", 0.6))
-        yaw_cmd = int(yaw_kp * yaw_err_deg)
+        marker_angle, _ = calculate_marker_angle(rvec)        # === [CHANGED] ===
+        target_alignment_angle = 0.0                          # === [CHANGED] ===
+        angle_error = marker_angle - target_alignment_angle   # === [CHANGED] ===
+        angle_dead_zone = float(ctx.params.get("YAW_TOL_DEG", 5.0))  # === [CHANGED] ===
+        if abs(angle_error) < angle_dead_zone:                # === [CHANGED] ===
+            angle_error = 0                                   # === [CHANGED] ===
 
-        cap = int(ctx.params["MAX_RC"])
+        cap = int(ctx.params.get("MAX_RC", 25))
         lr  = max(-cap, min(cap, lr))
         ud  = max(-cap, min(cap, ud))
         fb  = max(-cap, min(cap, fb))
-        yaw_cmd = max(-cap, min(cap, yaw_cmd))
+        angle_error = max(-cap, min(cap, angle_error))        # === [CHANGED] ===
 
-        self.send_rc(lr, fb, -ud, yaw_cmd)
+        self.send_rc(lr, fb, -ud, int(-angle_error))          # === [CHANGED] ===
 
-        yaw_tol = float(ctx.params.get("YAW_TOL_DEG", 5.0))
+        # 保留原本「有跟上 FOLLOW_ID 時」的穩定判斷（對 x/y/z/角度）
         if (abs(err_x) <= ctx.params["CENTER_X_TOL"] and
             abs(err_y) <= ctx.params["CENTER_Y_TOL"] and
             abs(err_z) <= ctx.params["Z_TOL"] and
-            abs(yaw_err_deg) <= yaw_tol):
+            abs(angle_error) == 0):
             self._follow_stable += 1
         else:
             self._follow_stable = 0
@@ -533,6 +538,7 @@ class DroneFSM:
             return State.PASS_UNDER_TABLE_3
 
         return State.FOLLOW_MARKER_ID
+
 
 
 
