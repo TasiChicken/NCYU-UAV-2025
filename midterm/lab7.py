@@ -543,8 +543,6 @@ class DroneFSM:
         return State.FOLLOW_MARKER_ID
 
 
-
-
     def handle_PASS_UNDER_TABLE_3(self, ctx: Context) -> State:
         """
         Pass under table:
@@ -771,7 +769,7 @@ class DroneFSM:
             print(f"[OVERBOARD] Marker {tid} detected! Transitioning to DONE")
             self.hover()
             time.sleep(0.3)  # Brief pause for stability
-            return State.DONE
+            return State.ALIGN_Y5_FLIP_LAND
         
         # Marker not detected - continue moving left only
         lr_speed = ctx.params.get("OVERBOARD_LR", -15)  # Negative = left
