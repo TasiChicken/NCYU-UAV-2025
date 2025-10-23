@@ -158,8 +158,9 @@ class Context:
     params: dict = field(default_factory=lambda: {
         "ID1": 1,
         "ID2": 2,
-        "ASCENT_SPEED": -20,        # 依你的慣例 ud<0 上升
-        "SEARCH_RIGHT_SPEED": 20,
+        "TARGET_ID": None,
+        "ASCENT_SPEED": 40,        
+        "SEARCH_RIGHT_SPEED": 30,
         "CENTER_X_TOL": 15.0,
         "CENTER_Y_TOL": 15.0,
         "TARGET_Z": 90.0,
@@ -198,12 +199,14 @@ class DroneFSM:
         self.state = State.CREEP_FORWARD
         self.strafe_t0 = None
         self.handlers = {
-            State.ASCEND_SEARCH_1: self.handle_ASCEND_SEARCH_1,
-            State.CENTER_ON_1:     self.handle_CENTER_ON_1,
-            State.STRAFE_TO_FIND_2:self.handle_STRAFE_TO_FIND_2,
-            State.CENTER_ON_2:     self.handle_CENTER_ON_2,
-            State.FORWARD_TO_TARGET:self.handle_FORWARD_TO_TARGET,
-            State.STRAFE_LEFT:     self.handle_STRAFE_LEFT,
+            State.ASCEND_SEARCH      : self.handle_ASCEND_SEARCH,
+            State.CENTER_ONE         : self.handle_CENTER_ONE,
+            State.SCAN_SECOND        : self.handle_SCAN_SECOND,
+            State.DECIDE_TARGET      : self.handle_DECIDE_TARGET,
+            State.CENTER_ON_TARGET   : self.handle_CENTER_ON_TARGET,
+            State.FORWARD_TO_TARGET  : self.handle_FORWARD_TO_TARGET,
+            State.STRAFE_OPPOSITE    : self.handle_STRAFE_OPPOSITE,
+            State.CREEP_FORWARD      : self.handle_CREEP_FORWARD,
 
             State.FOLLOW_MARKER_ID:       self.handle_FOLLOW_MARKER_ID,
             State.PASS_UNDER_TABLE_3:     self.handle_PASS_UNDER_TABLE_3,
