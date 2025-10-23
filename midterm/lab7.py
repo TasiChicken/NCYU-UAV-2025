@@ -122,6 +122,7 @@ class MarkerDetector:
         return ids, poses
 
 class State(enum.Enum):
+    ASCEND_SEARCH      = enum.auto()
     CENTER_ONE         = enum.auto()
     SCAN_SECOND        = enum.auto()
     DECIDE_TARGET      = enum.auto()
