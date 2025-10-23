@@ -162,14 +162,19 @@ class Context:
         "STRAFE_LEFT_CM": 70,
         "MAX_RC": 25
 
-        "FOLLOW_ID": 2,            # 要跟隨的 marker
-        "MARKER_3": 3,             # 穿桌用的 marker
-        "MARKER_4": 4,             # 牆上定位用的 marker
-        "MARKER_5": 5,             # 終點判斷用的 marker
-        "ROTATE_DEG": 90,          # 右轉角度
-        "OVERBOARD_LR": -15,       # 往左水平移動的 rc 速度
-        "OVERBOARD_UD": +8,        # 往上微升的 rc 速度
-        "TRACK_STABLE_N": 5,       # 連續幀數達標才視為穩定        
+        # following
+        "FOLLOW_ID": 2,             # 要跟隨的 marker
+        "SEARCH_FORWARD_SPEED": 10,  # 看不到 marker 時的前進速度
+        "YAW_KP": 0.6,               # 偏航角度(度) → RC yaw 速度的比例
+        "YAW_TOL_DEG": 5.0,          # 視為已垂直的角度公差
+
+        "MARKER_3": 3,              # 穿桌用的 marker
+        "MARKER_4": 4,              # 牆上定位用的 marker
+        "MARKER_5": 5,              # 終點判斷用的 marker
+        "ROTATE_DEG": 90,           # 右轉角度
+        "OVERBOARD_LR": -15,        # 往左水平移動的 rc 速度
+        "OVERBOARD_UD": +8,         # 往上微升的 rc 速度
+        "TRACK_STABLE_N": 5,        # 連續幀數達標才視為穩定       
     })
 
 class DroneFSM:
@@ -413,12 +418,67 @@ class DroneFSM:
     
     def handle_FOLLOW_MARKER_ID(self, ctx: Context) -> State:
         """
-        TODO:
-        - 讀 ctx.params["FOLLOW_ID"]（預設 2）。
-        - 若看不到該 ID：可做搜尋/小幅掃描；看到後以 PID 對齊（x,y）並依距離(z)前進/後退。
-        - 達到你定義的接替條件（例如接近某距離或穩定 N 幀）→ PASS_UNDER_TABLE_3。
+        跟隨指定 ID，並在看見 marker 時同時做中心對齊 (x,y)、距離對齊 (z)，
+        並以 yaw 校正讓機頭轉到與 marker 垂直。
         """
+        tid = ctx.params["FOLLOW_ID"]
+
+        if not hasattr(self, "_follow_stable"):
+            self._follow_stable = 0
+
+        poses = getattr(ctx, "last_poses", {}) or {}
+        if tid not in poses:
+            # 看不到 marker：改為「緩慢前進」
+            self._follow_stable = 0
+            fwd_speed = int(ctx.params.get("SEARCH_FORWARD_SPEED", 10))
+            self.send_rc(0, fwd_speed, 0, 0)
+            return State.FOLLOW_MARKER_ID
+
+        rvec, tvec = poses[tid]
+        x = float(tvec[0][0])
+        y = float(tvec[1][0])
+        z = float(tvec[2][0])
+
+        err_x = x
+        err_y = y
+        err_z = z - ctx.params["TARGET_Z"]
+
+        lr = int(self.pid_lr.update(err_x, sleep=0.0))
+        ud = int(self.pid_ud.update(err_y, sleep=0.0))
+        fb = int(self.pid_fb.update(err_z, sleep=0.0))
+
+        # === [CHANGED] 新增：由 rvec 推回偏航角誤差 → 轉成 yaw 速度 ===
+        yaw_err_deg = self._marker_yaw_error_deg_from_rvec(rvec)
+        yaw_kp = float(ctx.params.get("YAW_KP", 0.6))
+        yaw_cmd = int(yaw_kp * yaw_err_deg)
+
+        # 速度限幅
+        cap = int(ctx.params["MAX_RC"])
+        lr  = max(-cap, min(cap, lr))
+        ud  = max(-cap, min(cap, ud))
+        fb  = max(-cap, min(cap, fb))
+        yaw_cmd = max(-cap, min(cap, yaw_cmd))  # === [CHANGED] ===
+
+        # 實際送 RC；注意相機 y 與 RC z 的號誌
+        self.send_rc(lr, fb, -ud, yaw_cmd)  # === [CHANGED] ===
+
+        # 穩定達標檢查（多加一個 yaw 公差門檻）
+        yaw_tol = float(ctx.params.get("YAW_TOL_DEG", 5.0))  # === [CHANGED] ===
+        if (abs(err_x) <= ctx.params["CENTER_X_TOL"] and
+            abs(err_y) <= ctx.params["CENTER_Y_TOL"] and
+            abs(err_z) <= ctx.params["Z_TOL"] and
+            abs(yaw_err_deg) <= yaw_tol):  # === [CHANGED] ===
+            self._follow_stable += 1
+        else:
+            self._follow_stable = 0
+
+        if self._follow_stable >= ctx.params["TRACK_STABLE_N"]:
+            self.hover()
+            self._follow_stable = 0
+            return State.PASS_UNDER_TABLE_3
+
         return State.FOLLOW_MARKER_ID
+
 
     def handle_PASS_UNDER_TABLE_3(self, ctx: Context) -> State:
         """
