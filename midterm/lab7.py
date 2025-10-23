@@ -176,25 +176,40 @@ class Context:
         "ROTATE_DEG": 90,           # 右轉角度
         "OVERBOARD_LR": -15,        # 往左水平移動的 rc 速度
         "OVERBOARD_UD": +8,         # 往上微升的 rc 速度
-        "TRACK_STABLE_N": 5,        # 連續幀數達標才視為穩定       
+        "TRACK_STABLE_N": 5,        # 連續幀數達標才視為穩定
+        
+        # PASS_UNDER_TABLE_3 parameters
+        "PASS_SEARCH_FB": 5,        # Phase 0: 搜尋時的前進速度
+        "PASS_DESCENT_UD": 20,      # Phase 1: 下降速度
+        "PASS_DESCENT_TIME": 2.5,   # Phase 1: 下降時間 (秒)
+        "PASS_FORWARD_FB": 40,      # Phase 2: 前進速度
+        "PASS_FORWARD_TIME": 5.0,   # Phase 2: 前進時間 (秒)
+        
+        # ROTATE_RIGHT_90 parameters
+        "ROTATE_SPEED": 30,         # 旋轉速度 (deg/s)
+        "ROTATE_YAW": 30,           # 旋轉時的 yaw RC 速度
+
+        # ASCEND_LOCK_4 parameters
+        "ASCEND_LOCK_SPEED": 15,    # 上升搜尋時的上升速度
+
+        # OVERBOARD_TO_FIND_5 parameters
+        "OVERBOARD_ASCEND_UD": -20,   # 上升速度 (ud<0 = up)
+        "OVERBOARD_ASCEND_TIME": 4.0, # 目標上升約 80cm 的時間 (秒)
     })
 
 class DroneFSM:
     def __init__(self, ctx: Context):
         self.ctx = ctx
-        self.state = State.FOLLOW_MARKER_ID  # ★ 直接從第一步開始（模擬/地面也跑）
+        self.state = State.PASS_UNDER_TABLE_3  # ★ 直接從第一步開始（模擬/地面也跑）
         self.strafe_t0 = None
         self.done_t0 = None          # DONE 用的計時器
         self.handlers = {
-            
-            State.ASCEND_SEARCH      : self.handle_ASCEND_SEARCH,
-            State.CENTER_ONE         : self.handle_CENTER_ONE,
-            State.SCAN_SECOND        : self.handle_SCAN_SECOND,
-            State.DECIDE_TARGET      : self.handle_DECIDE_TARGET,
-            State.CENTER_ON_TARGET   : self.handle_CENTER_ON_TARGET,
-            State.FORWARD_TO_TARGET  : self.handle_FORWARD_TO_TARGET,
-            State.STRAFE_OPPOSITE    : self.handle_STRAFE_OPPOSITE,
-            State.CREEP_FORWARD      : self.handle_CREEP_FORWARD,
+            State.ASCEND_SEARCH_1: self.handle_ASCEND_SEARCH_1,
+            State.CENTER_ON_1:     self.handle_CENTER_ON_1,
+            State.STRAFE_TO_FIND_2:self.handle_STRAFE_TO_FIND_2,
+            State.CENTER_ON_2:     self.handle_CENTER_ON_2,
+            State.FORWARD_TO_TARGET:self.handle_FORWARD_TO_TARGET,
+            State.STRAFE_LEFT:     self.handle_STRAFE_LEFT,
 
             State.FOLLOW_MARKER_ID:       self.handle_FOLLOW_MARKER_ID,
             State.PASS_UNDER_TABLE_3:     self.handle_PASS_UNDER_TABLE_3,
@@ -559,7 +574,8 @@ class DroneFSM:
             poses = getattr(ctx, "last_poses", {}) or {}
             if tid not in poses:
                 # Keep searching - gentle forward movement
-                self.send_rc(0, 5, 0, 0)  # Slow forward
+                search_fb = ctx.params.get("PASS_SEARCH_FB", 5)
+                self.send_rc(0, search_fb, 0, 0)
                 cv2.putText(frame, f"Searching for Marker {tid}...", 
                            (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 2)
                 return State.PASS_UNDER_TABLE_3
@@ -573,14 +589,14 @@ class DroneFSM:
             return State.PASS_UNDER_TABLE_3
         
         # Phase 1: Descend 50cm (using time-based control)
-        # Assuming descent speed of ~20 cm/s, 50cm takes ~2.5 seconds
         if self._pass_phase == 1:
-            DESCENT_TIME = 2.5  # seconds for 50cm descent
+            DESCENT_TIME = ctx.params.get("PASS_DESCENT_TIME", 2.5)
+            descent_ud = ctx.params.get("PASS_DESCENT_UD", 20)
             elapsed = time.time() - self._pass_t0
             
             if elapsed < DESCENT_TIME:
                 # Continue descending (ud>0 = down)
-                self.send_rc(0, 0, 20, 0)  # Gentle descent
+                self.send_rc(0, 0, descent_ud, 0)
                 cv2.putText(frame, f"Descending... {elapsed:.1f}s / {DESCENT_TIME}s", 
                            (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
                 return State.PASS_UNDER_TABLE_3
@@ -594,14 +610,14 @@ class DroneFSM:
             return State.PASS_UNDER_TABLE_3
         
         # Phase 2: Move forward 2m (200cm)
-        # Assuming forward speed of ~40 cm/s, 200cm takes ~5 seconds
         if self._pass_phase == 2:
-            FORWARD_TIME = 5.0  # seconds for 2m forward
+            FORWARD_TIME = ctx.params.get("PASS_FORWARD_TIME", 5.0)
+            forward_fb = ctx.params.get("PASS_FORWARD_FB", 40)
             elapsed = time.time() - self._pass_t0
             
             if elapsed < FORWARD_TIME:
                 # Continue moving forward
-                self.send_rc(0, 40, 0, 0)  # Moderate forward speed
+                self.send_rc(0, forward_fb, 0, 0)
                 cv2.putText(frame, f"Moving forward... {elapsed:.1f}s / {FORWARD_TIME}s", 
                            (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
                 return State.PASS_UNDER_TABLE_3
@@ -642,17 +658,17 @@ class DroneFSM:
             return State.ROTATE_RIGHT_90
         
         # Phase 1: Rotate 90 degrees
-        # Using rotation speed of 30 deg/s, 90° takes ~3 seconds
         if self._rotate_phase == 1:
             ROTATE_DEG = ctx.params.get("ROTATE_DEG", 90)
-            ROTATE_SPEED = 30  # Degrees per second
-            ROTATE_TIME = ROTATE_DEG / ROTATE_SPEED  # ~3 seconds for 90°
+            ROTATE_SPEED = ctx.params.get("ROTATE_SPEED", 30)  # Degrees per second
+            rotate_yaw = ctx.params.get("ROTATE_YAW", 30)
+            ROTATE_TIME = ROTATE_DEG / ROTATE_SPEED
             
             elapsed = time.time() - self._rotate_t0
             
             if elapsed < ROTATE_TIME:
                 # Continue rotating clockwise (positive yaw)
-                self.send_rc(0, 0, 0, 30)  # yaw>0 = clockwise
+                self.send_rc(0, 0, 0, rotate_yaw)
                 cv2.putText(frame, f"Rotating CW... {elapsed:.1f}s / {ROTATE_TIME:.1f}s", 
                            (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
                 return State.ROTATE_RIGHT_90
@@ -689,8 +705,8 @@ class DroneFSM:
         if tid not in poses:
             # Marker not detected - continue ascending while searching
             self._ascend_stable = 0
-            ASCEND_SPEED = 15  # Gentle ascent
-            self.send_rc(0, 0, -ASCEND_SPEED, 0)  # ud<0 = up
+            ascend_speed = ctx.params.get("ASCEND_LOCK_SPEED", 15)
+            self.send_rc(0, 0, -ascend_speed, 0)  # ud<0 = up
             cv2.putText(frame, f"Ascending, searching for Marker {tid}...", 
                        (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 2)
             return State.ASCEND_LOCK_4
