@@ -173,7 +173,7 @@ class Context:
 
 
         # following
-        "FOLLOW_ID": 2,             # 要跟隨的 marker
+        "FOLLOW_ID": 1,             # 要跟隨的 marker
         "SEARCH_FORWARD_SPEED": 10,  # 看不到 marker 時的前進速度
         "YAW_KP": 0.6,               # 偏航角度(度) → RC yaw 速度的比例
         "YAW_TOL_DEG": 5.0,          # 視為已垂直的角度公差
@@ -190,7 +190,7 @@ class Context:
 class DroneFSM:
     def __init__(self, ctx: Context):
         self.ctx = ctx
-        self.state = State.ASCEND_SEARCH  # ★ 直接從第一步開始（模擬/地面也跑）
+        self.state = State.FOLLOW_MARKER_ID  # ★ 直接從第一步開始（模擬/地面也跑）
         self.strafe_t0 = None
         self.done_t0 = None          # DONE 用的計時器
         self.handlers = {
@@ -465,7 +465,6 @@ class DroneFSM:
         
         return State.CREEP_FORWARD
 
-    
     def handle_FOLLOW_MARKER_ID(self, ctx: Context) -> State:
         """
         跟隨指定 ID，並在看見 marker 時同時做中心對齊 (x,y)、距離對齊 (z)，
@@ -477,8 +476,17 @@ class DroneFSM:
             self._follow_stable = 0
 
         poses = getattr(ctx, "last_poses", {}) or {}
+
+        # === [CHANGED] 新增：提前取出 MARKER_3 id（若未在 params 內，預設 3） ===
+        marker3 = int(ctx.params.get("MARKER_3", 3))  # === [CHANGED] ===
+
         if tid not in poses:
-            # 看不到 marker：改為「緩慢前進」
+            # === [CHANGED] 若看不到 FOLLOW_ID，但看得到 MARKER_3，直接切換狀態 ===
+            if marker3 in poses:                                # === [CHANGED] ===
+                self._follow_stable = 0                         # === [CHANGED] ===
+                self.hover()                                    # === [CHANGED] ===
+                return State.PASS_UNDER_TABLE_3                 # === [CHANGED] ===
+            # === [CHANGED] 否則維持原本「緩慢前進」行為 ===
             self._follow_stable = 0
             fwd_speed = int(ctx.params.get("SEARCH_FORWARD_SPEED", 10))
             self.send_rc(0, fwd_speed, 0, 0)
@@ -497,27 +505,24 @@ class DroneFSM:
         ud = int(self.pid_ud.update(err_y, sleep=0.0))
         fb = int(self.pid_fb.update(err_z, sleep=0.0))
 
-        # === [CHANGED] 新增：由 rvec 推回偏航角誤差 → 轉成 yaw 速度 ===
+        # === [CHANGED] 由 rvec 推回偏航角誤差 → 轉成 yaw 速度（保持原本邏輯） ===
         yaw_err_deg = self._marker_yaw_error_deg_from_rvec(rvec)
         yaw_kp = float(ctx.params.get("YAW_KP", 0.6))
         yaw_cmd = int(yaw_kp * yaw_err_deg)
 
-        # 速度限幅
         cap = int(ctx.params["MAX_RC"])
         lr  = max(-cap, min(cap, lr))
         ud  = max(-cap, min(cap, ud))
         fb  = max(-cap, min(cap, fb))
-        yaw_cmd = max(-cap, min(cap, yaw_cmd))  # === [CHANGED] ===
+        yaw_cmd = max(-cap, min(cap, yaw_cmd))
 
-        # 實際送 RC；注意相機 y 與 RC z 的號誌
-        self.send_rc(lr, fb, -ud, yaw_cmd)  # === [CHANGED] ===
+        self.send_rc(lr, fb, -ud, yaw_cmd)
 
-        # 穩定達標檢查（多加一個 yaw 公差門檻）
-        yaw_tol = float(ctx.params.get("YAW_TOL_DEG", 5.0))  # === [CHANGED] ===
+        yaw_tol = float(ctx.params.get("YAW_TOL_DEG", 5.0))
         if (abs(err_x) <= ctx.params["CENTER_X_TOL"] and
             abs(err_y) <= ctx.params["CENTER_Y_TOL"] and
             abs(err_z) <= ctx.params["Z_TOL"] and
-            abs(yaw_err_deg) <= yaw_tol):  # === [CHANGED] ===
+            abs(yaw_err_deg) <= yaw_tol):
             self._follow_stable += 1
         else:
             self._follow_stable = 0
@@ -528,6 +533,7 @@ class DroneFSM:
             return State.PASS_UNDER_TABLE_3
 
         return State.FOLLOW_MARKER_ID
+
 
 
     def handle_PASS_UNDER_TABLE_3(self, ctx: Context) -> State:
