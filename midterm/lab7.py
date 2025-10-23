@@ -15,9 +15,10 @@ from pyimagesearch.pid import PID
 
 def calculate_marker_angle(rvec):
     R, _ = cv2.Rodrigues(rvec)
-    marker_x_in_camera = R @ np.array([1, 0, 0])
-    angle_rad_alt = math.atan2(marker_x_in_camera[1], marker_x_in_camera[0])
-    return math.degrees(angle_rad_alt), R
+    angle_rad = math.atan2(-R[1, 0], R[0, 0])
+    angle_deg = math.degrees(angle_rad)
+    
+    return angle_deg, R
 
 def keyboard(drone: Tello, key: int, airborne: bool, simulation: bool):
     """
@@ -189,6 +190,8 @@ class Context:
 
         "MARKER5_TARGET_Y": 0.0,   # 期望的相機座標系 y 距離（單位同 tvec，通常是 cm）
         "Y_TOL": 5.0,              # y 距離容許誤差（cm）     
+
+        "FOLLOW_DIS": 80.0
     })
 
 class DroneFSM:
@@ -485,75 +488,79 @@ class DroneFSM:
         return State.CREEP_FORWARD
 
     def handle_FOLLOW_MARKER_ID(self, ctx: Context) -> State:
-        """
-        跟隨指定 ID；若『看不到 FOLLOW_ID、但看到 MARKER_3』→ 立刻轉入 PASS_UNDER_TABLE_3。
-        其他時候依 lab6 風格：x/y/z 用 PID，角度用 calculate_marker_angle 校正旋轉。
-        """
         tid = ctx.params["FOLLOW_ID"]
-
-        if not hasattr(self, "_follow_stable"):
-            self._follow_stable = 0
+        marker3 = ctx.params["MARKER_3"]
+        target_dist = ctx.params["FOLLOW_DIS"]
 
         poses = getattr(ctx, "last_poses", {}) or {}
 
-        # === [CHANGED] 先抓 marker3 id（預設 3）
-        marker3 = int(ctx.params.get("MARKER_3", 3))  # === [CHANGED] ===
-
-        # === [CHANGED] 分支順序改為：若「看不到 FOLLOW_ID 且 看得到 MARKER_3」→ 直接切狀態
-        if tid not in poses and marker3 in poses:      # === [CHANGED] ===
-            self._follow_stable = 0                    # === [CHANGED] ===
-            self.hover()                               # === [CHANGED] ===
-            return State.PASS_UNDER_TABLE_3            # === [CHANGED] ===
-
-        if tid not in poses:
-            # 看不到兩者：維持「緩慢前進」以便重新遇到目標
-            self._follow_stable = 0
-            return State.FOLLOW_MARKER_ID
-
-        # 下面依 lab6 風格做 PID + 角度校正
-        rvec, tvec = poses[tid]
-        x = float(tvec[0][0])
-        y = float(tvec[1][0])
-        z = float(tvec[2][0])
-
-        err_x = x
-        err_y = y
-        err_z = z - ctx.params["TARGET_Z"]
-
-        # 與 lab6 一致：x→lr, y→ud, z→fb
-        lr = int(ctx.pid_lr.update(err_x, sleep=0.0))
-        ud = int(ctx.pid_ud.update(err_y, sleep=0.0))
-        fb = int(ctx.pid_fb.update(err_z, sleep=0.0))
-
-        marker_angle, _ = calculate_marker_angle(rvec)        # === [CHANGED] ===
-        target_alignment_angle = 0.0                          # === [CHANGED] ===
-        angle_error = marker_angle - target_alignment_angle   # === [CHANGED] ===
-        angle_dead_zone = float(ctx.params.get("YAW_TOL_DEG", 5.0))  # === [CHANGED] ===
-        if abs(angle_error) < angle_dead_zone:                # === [CHANGED] ===
-            angle_error = 0                                   # === [CHANGED] ===
-
-        cap = int(ctx.params.get("MAX_RC", 25))
-        lr  = max(-cap, min(cap, lr))
-        ud  = max(-cap, min(cap, ud))
-        fb  = max(-cap, min(cap, fb))
-        angle_error = max(-cap, min(cap, angle_error))        # === [CHANGED] ===
-
-        self.send_rc(lr, fb, -ud, int(-angle_error))          # === [CHANGED] ===
-
-        # 保留原本「有跟上 FOLLOW_ID 時」的穩定判斷（對 x/y/z/角度）
-        if (abs(err_x) <= ctx.params["CENTER_X_TOL"] and
-            abs(err_y) <= ctx.params["CENTER_Y_TOL"] and
-            abs(err_z) <= ctx.params["Z_TOL"] and
-            abs(angle_error) == 0):
-            self._follow_stable += 1
-        else:
-            self._follow_stable = 0
-
-        if self._follow_stable >= ctx.params["TRACK_STABLE_N"]:
-            self.hover()
-            self._follow_stable = 0
+        if tid not in poses and marker3 in poses:
+            self.hover()                  
             return State.PASS_UNDER_TABLE_3
 
+        if tid not in poses:
+            return State.FOLLOW_MARKER_ID  
+        
+        rvec, tvec = poses[tid]
+
+        x, y, z = tvec[0][0], tvec[1][0], tvec[2][0]
+        
+        # Calculate marker rotation angle using rvec
+        marker_angle, z_prime = calculate_marker_angle(rvec)
+        
+        # Calculate errors for PID tuning analysis
+        error_x = x  # Left/Right error
+        error_y = y  # Up/Down error
+        error_z = z - target_dist  # Forward/Back error (target 80cm)
+        
+        
+        # Step 2: Use PID to get control outputs
+        yaw_update = ctx.pid_lr.update(error_x, sleep=0.0)      # Left/Right movement
+        ud_update = ctx.pid_ud.update(error_y, sleep=0.0)        # Up/Down movement
+        fb_update = ctx.pid_fb.update(error_z, sleep=0.0)        # Forward/Back movement
+    
+        
+        # Step 3: Apply speed limiting to prevent loss of control (建議限制最高速度防止失控)
+        max_speed_threshold = 25
+        
+        # Limit yaw (left/right) speed
+        if yaw_update > max_speed_threshold:
+            yaw_update = max_speed_threshold
+        elif yaw_update < -max_speed_threshold:
+            yaw_update = -max_speed_threshold
+        
+        # Limit up/down speed  
+        if ud_update > max_speed_threshold:
+            ud_update = max_speed_threshold
+        elif ud_update < -max_speed_threshold:
+            ud_update = -max_speed_threshold
+        
+        # Limit forward/back speed
+        if fb_update > max_speed_threshold:
+            fb_update = max_speed_threshold
+        elif fb_update < -max_speed_threshold:
+            fb_update = -max_speed_threshold
+        
+        # Add rotation control based on marker orientation with proper angle normalization
+        # Target alignment angle - we want the marker to appear level in the image
+        # 0° = horizontal alignment (marker appears level)
+        target_alignment_angle = 0.0
+        
+        # Calculate shortest angle error  
+        angle_error = marker_angle - target_alignment_angle
+        
+        # Dead zone - don't rotate if error is small (prevents jittering)
+        angle_dead_zone = 5.0  # degrees - larger dead zone for stability
+        if abs(angle_error) < angle_dead_zone:
+            angle_error = 0
+        
+        # Apply speed limiting for rotation
+        if angle_error > max_speed_threshold:
+            angle_error = max_speed_threshold
+        elif angle_error < -max_speed_threshold:
+            angle_error = -max_speed_threshold
+        
+        self.ctx.drone.send_rc_control(int(yaw_update), int(fb_update), int(-ud_update), int(-angle_error))
         return State.FOLLOW_MARKER_ID
 
 
