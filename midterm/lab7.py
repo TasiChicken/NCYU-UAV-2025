@@ -168,7 +168,7 @@ class Context:
         "STRAFE_RC": 35,          # 側移 RC 速度
         "STRAFE_TIME_1M": 2.2,    # 估 2.2 秒 ≈ 1m（需實機校正）
         "STRAFE_TIME_SCAN": 1.0,   # 側移掃描時間
-        "CREEP_FB": 12,           # 慢速前進 RC
+        "CREEP_FB": 15,           # 慢速前進 RC
         "MAX_RC": 40,
         "OPPOSITE_STRAFE_SIGN": 0, # 之後決定
         "PHASE": 0,             # 掃描階段計數器
@@ -354,6 +354,10 @@ class DroneFSM:
         except KeyError:
             self.send_rc(0, 0, 0, 0)
             return State.CENTER_ONE
+        except IndexError:
+            self.send_rc(0, 0, 0, 0)
+            return State.CENTER_ONE
+
     
     def handle_SCAN_SECOND(self, ctx):
         
@@ -373,7 +377,7 @@ class DroneFSM:
             self.send_rc(sign * v, 0, 0, 0)  
             if self.strafe_t0 is None:
                 self.strafe_t0 = time.time()
-            if time.time() - self.strafe_t0 > ctx.params["STRAFE_TIME_SCAN"]:
+            if time.time() - self.strafe_t0 > 1.0: 
                 ctx.params["PHASE"] += 1 
                 self.strafe_t0 = time.time()
             return State.SCAN_SECOND
@@ -388,8 +392,13 @@ class DroneFSM:
         poses = ctx.last_poses
         id1_in = ctx.params["ID1"] in poses
         id2_in = ctx.params["ID2"] in poses
+
+
         # 1) 選較遠的目標
         self.ids_candidates = [ctx.params["ID1"], ctx.params["ID2"]]
+        if len(poses) < 2:
+            return State.SCAN_SECOND
+        
         target_id = self._pick_farther_id(poses)
 
         ctx.params["TARGET_ID"] = target_id
@@ -444,15 +453,18 @@ class DroneFSM:
             return State.FORWARD_TO_TARGET
         except KeyError:
             self.send_rc(0, 0, 0, 0)
-            return State.FORWARD_TO_TARGET
+            return State.STRAFE_OPPOSITE
     
     def handle_STRAFE_OPPOSITE(self, ctx):
         frame = ctx.frame_read.frame
         cv2.putText(frame, "STRAFE_OPPOSITE", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,255), 2)
 
         try:
+            if self.strafe_t0 is None:
+                self.strafe_t0 = time.time()
+
             direction_sign = ctx.params["OPPOSITE_STRAFE_SIGN"]
-            self.send_rc(-direction_sign * 35, 0, 0, 0)
+            self.send_rc(direction_sign * 20, 0, 0, 0)
             if time.time() - self.strafe_t0 > 2.2:
                 self.strafe_t0 = None
                 return State.CREEP_FORWARD
