@@ -165,12 +165,18 @@ class Context:
         "TARGET_Z": 50.0,
         "Z_TOL": 8.0,
         "STRAFE_LEFT_CM": 70,
-        "MAX_RC": 25
+        "STRAFE_RC": 35,          # 側移 RC 速度
+        "STRAFE_TIME_1M": 2.2,    # 估 2.2 秒 ≈ 1m（需實機校正）
+        "STRAFE_TIME_SCAN": 1.0,   # 側移掃描時間
+        "CREEP_FB": 15,           # 慢速前進 RC
+        "MAX_RC": 40,
+        "OPPOSITE_STRAFE_SIGN": 0, # 之後決定
+        "PHASE": 0,             # 掃描階段計數器
+
 
         # following
         "FOLLOW_ID": 1,             # 要跟隨的 marker
-        "YAW_KP": 0.6,               # 偏航角度(度) → RC yaw 速度的比例
-        "YAW_TOL_DEG": 5.0,          # 視為已垂直的角度公差
+        "FOLLOW_DIS": 60.0,
 
         "MARKER_3": 3,              # 穿桌用的 marker
         "MARKER_4": 4,              # 牆上定位用的 marker
@@ -178,31 +184,18 @@ class Context:
         "ROTATE_DEG": 90,           # 右轉角度
         "OVERBOARD_LR": -15,        # 往左水平移動的 rc 速度
         "OVERBOARD_UD": +8,         # 往上微升的 rc 速度
-        "TRACK_STABLE_N": 5,        # 連續幀數達標才視為穩定
-        
-        # PASS_UNDER_TABLE_3 parameters
-        "PASS_SEARCH_FB": 5,        # Phase 0: 搜尋時的前進速度
-        "PASS_DESCENT_UD": 20,      # Phase 1: 下降速度
-        "PASS_DESCENT_TIME": 2.5,   # Phase 1: 下降時間 (秒)
-        "PASS_FORWARD_FB": 40,      # Phase 2: 前進速度
-        "PASS_FORWARD_TIME": 5.0,   # Phase 2: 前進時間 (秒)
-        
-        # ROTATE_RIGHT_90 parameters
-        "ROTATE_SPEED": 30,         # 旋轉速度 (deg/s)
-        "ROTATE_YAW": 30,           # 旋轉時的 yaw RC 速度
+        "TRACK_STABLE_N": 5,        # 連續幀數達標才視為穩定  
 
-        # ASCEND_LOCK_4 parameters
-        "ASCEND_LOCK_SPEED": 15,    # 上升搜尋時的上升速度
+        "MARKER5_TARGET_Y": 0.0,   # 期望的相機座標系 y 距離（單位同 tvec，通常是 cm）
+        "Y_TOL": 5.0,              # y 距離容許誤差（cm）     
 
-        # OVERBOARD_TO_FIND_5 parameters
-        "OVERBOARD_ASCEND_UD": -20,   # 上升速度 (ud<0 = up)
-        "OVERBOARD_ASCEND_TIME": 4.0, # 目標上升約 80cm 的時間 (秒)
+
     })
 
 class DroneFSM:
     def __init__(self, ctx: Context):
         self.ctx = ctx
-        self.state = State.ASCEND_SEARCH  # ★ 直接從第一步開始（模擬/地面也跑）
+        self.state = State.CREEP_FORWARD
         self.strafe_t0 = None
         self.handlers = {
             State.ASCEND_SEARCH_1: self.handle_ASCEND_SEARCH_1,
@@ -359,6 +352,10 @@ class DroneFSM:
         except KeyError:
             self.send_rc(0, 0, 0, 0)
             return State.CENTER_ONE
+        except IndexError:
+            self.send_rc(0, 0, 0, 0)
+            return State.CENTER_ONE
+
     
     def handle_SCAN_SECOND(self, ctx):
         
@@ -378,7 +375,7 @@ class DroneFSM:
             self.send_rc(sign * v, 0, 0, 0)  
             if self.strafe_t0 is None:
                 self.strafe_t0 = time.time()
-            if time.time() - self.strafe_t0 > ctx.params["STRAFE_TIME_SCAN"]:
+            if time.time() - self.strafe_t0 > 1.0: 
                 ctx.params["PHASE"] += 1 
                 self.strafe_t0 = time.time()
             return State.SCAN_SECOND
@@ -393,8 +390,13 @@ class DroneFSM:
         poses = ctx.last_poses
         id1_in = ctx.params["ID1"] in poses
         id2_in = ctx.params["ID2"] in poses
+
+
         # 1) 選較遠的目標
         self.ids_candidates = [ctx.params["ID1"], ctx.params["ID2"]]
+        if len(poses) < 2:
+            return State.SCAN_SECOND
+        
         target_id = self._pick_farther_id(poses)
 
         ctx.params["TARGET_ID"] = target_id
@@ -449,15 +451,18 @@ class DroneFSM:
             return State.FORWARD_TO_TARGET
         except KeyError:
             self.send_rc(0, 0, 0, 0)
-            return State.FORWARD_TO_TARGET
+            return State.STRAFE_OPPOSITE
     
     def handle_STRAFE_OPPOSITE(self, ctx):
         frame = ctx.frame_read.frame
         cv2.putText(frame, "STRAFE_OPPOSITE", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,255), 2)
 
         try:
+            if self.strafe_t0 is None:
+                self.strafe_t0 = time.time()
+
             direction_sign = ctx.params["OPPOSITE_STRAFE_SIGN"]
-            self.send_rc(-direction_sign * 35, 0, 0, 0)
+            self.send_rc(direction_sign * 20, 0, 0, 0)
             if time.time() - self.strafe_t0 > 2.2:
                 self.strafe_t0 = None
                 return State.CREEP_FORWARD
@@ -489,6 +494,7 @@ class DroneFSM:
             return State.PASS_UNDER_TABLE_3
 
         if tid not in poses:
+            self.hover()   
             return State.FOLLOW_MARKER_ID  
         
         rvec, tvec = poses[tid]
@@ -502,6 +508,7 @@ class DroneFSM:
         error_x = x  # Left/Right error
         error_y = y  # Up/Down error
         error_z = z - target_dist  # Forward/Back error (target 80cm)
+        print(error_z)
         
         
         # Step 2: Use PID to get control outputs
@@ -550,7 +557,7 @@ class DroneFSM:
         elif angle_error < -max_speed_threshold:
             angle_error = -max_speed_threshold
         
-        self.ctx.drone.send_rc_control(int(yaw_update), int(fb_update), int(-ud_update), int(-angle_error))
+        self.send_rc(int(yaw_update), int(fb_update), int(-ud_update), int(-angle_error))
         return State.FOLLOW_MARKER_ID
 
 
@@ -935,6 +942,8 @@ def main():
         try: drone.send_rc_control(0, 0, 0, 0)
         except: pass
         fsm.run()
+    except Exception as ex:
+        print(ex)
     finally:
         try: drone.send_rc_control(0, 0, 0, 0)
         except: pass
