@@ -121,14 +121,20 @@ class MarkerDetector:
                     poses[int(mid)] = (rvec, tvec)
         return ids, poses
 
-class State(enum.Enum):
-    ASCEND_SEARCH_1 = 0
-    CENTER_ON_1 = 1
-    STRAFE_TO_FIND_2 = 2
-    CENTER_ON_2 = 3
-    FORWARD_TO_TARGET = 4
-    STRAFE_LEFT = 5
-    DONE = 6
+class State(Enum):
+    ASCEND_SEARCH_1      = auto()
+    CENTER_ON_1          = auto()
+    STRAFE_TO_FIND_2     = auto()
+    CENTER_ON_2          = auto()
+    FORWARD_TO_TARGET    = auto()
+    STRAFE_LEFT          = auto()
+    DONE                 = auto()
+
+    FOLLOW_MARKER_ID     = auto() 
+    PASS_UNDER_TABLE_3   = auto() 
+    ROTATE_RIGHT_90      = auto() 
+    ASCEND_LOCK_4        = auto() 
+    OVERBOARD_TO_FIND_5  = auto() 
 
 @dataclass
 class Context:
@@ -155,6 +161,15 @@ class Context:
         "Z_TOL": 8.0,
         "STRAFE_LEFT_CM": 70,
         "MAX_RC": 25
+
+        "FOLLOW_ID": 2,            # 要跟隨的 marker
+        "MARKER_3": 3,             # 穿桌用的 marker
+        "MARKER_4": 4,             # 牆上定位用的 marker
+        "MARKER_5": 5,             # 終點判斷用的 marker
+        "ROTATE_DEG": 90,          # 右轉角度
+        "OVERBOARD_LR": -15,       # 往左水平移動的 rc 速度
+        "OVERBOARD_UD": +8,        # 往上微升的 rc 速度
+        "TRACK_STABLE_N": 5,       # 連續幀數達標才視為穩定        
     })
 
 class DroneFSM:
@@ -171,6 +186,13 @@ class DroneFSM:
             State.CENTER_ON_2:     self.handle_CENTER_ON_2,
             State.FORWARD_TO_TARGET:self.handle_FORWARD_TO_TARGET,
             State.STRAFE_LEFT:     self.handle_STRAFE_LEFT,
+
+            State.FOLLOW_MARKER_ID:       self.handle_FOLLOW_MARKER_ID,
+            State.PASS_UNDER_TABLE_3:     self.handle_PASS_UNDER_TABLE_3,
+            State.ROTATE_RIGHT_90:        self.handle_ROTATE_RIGHT_90,
+            State.ASCEND_LOCK_4:          self.handle_ASCEND_LOCK_4,
+            State.OVERBOARD_TO_FIND_5:    self.handle_OVERBOARD_TO_FIND_5,
+
             State.DONE:            self.handle_DONE,
         }
         self.blocking_running = False
@@ -384,10 +406,55 @@ class DroneFSM:
             # 停止、清計時器並收尾
             self.send_rc(0, 0, 0, 0)
             self.strafe_t0 = None
-            return State.DONE
+            return State.FOLLOW_MARKER_ID
 
         # 尚未到時間，維持 STRAFE_LEFT
         return State.STRAFE_LEFT
+    
+    def handle_FOLLOW_MARKER_ID(self, ctx: Context) -> State:
+        """
+        TODO:
+        - 讀 ctx.params["FOLLOW_ID"]（預設 2）。
+        - 若看不到該 ID：可做搜尋/小幅掃描；看到後以 PID 對齊（x,y）並依距離(z)前進/後退。
+        - 達到你定義的接替條件（例如接近某距離或穩定 N 幀）→ PASS_UNDER_TABLE_3。
+        """
+        return State.FOLLOW_MARKER_ID
+
+    def handle_PASS_UNDER_TABLE_3(self, ctx: Context) -> State:
+        """
+        TODO:
+        - 若偵測到 ctx.params["MARKER_3"]，以 ud<0 下降；可設定安全 z 與最長時間保護。
+        - 穿越完成（例如 z 小於門檻、或計時到）→ ROTATE_RIGHT_90。
+        """
+        return State.PASS_UNDER_TABLE_3
+
+    def handle_ROTATE_RIGHT_90(self, ctx: Context) -> State:
+        """
+        TODO:
+        - 以 yaw>0 送速度搭配時間估 90°，或直接呼叫 SDK rotate_clockwise(ctx.params["ROTATE_DEG"])。
+        - 完成後 → ASCEND_LOCK_4。
+        """
+        return State.ROTATE_RIGHT_90
+
+    def handle_ASCEND_LOCK_4(self, ctx: Context) -> State:
+        """
+        TODO:
+        - 持續微升（ud>0），搜尋並對齊 ctx.params["MARKER_4"]。
+        - 置中判準：|x|,|y| < tol 且連續 ctx.params["TRACK_STABLE_N"] 幀。
+        - 達成後 → OVERBOARD_TO_FIND_5。
+        """
+        return State.ASCEND_LOCK_4
+
+    def handle_OVERBOARD_TO_FIND_5(self, ctx: Context) -> State:
+        """
+        TODO:
+        - 維持微升（ud = params["OVERBOARD_UD"]）與向左水平（lr = params["OVERBOARD_LR"]）。
+        - 一旦偵測到 ctx.params["MARKER_5"]：
+            * 立即 hover，並（若需要）設旗標供 DONE 使用；
+            * 轉移 → DONE。
+        """
+        return State.OVERBOARD_TO_FIND_5
+
 
     def handle_DONE(self, ctx: Context) -> State:  # move forward and land
         frame = ctx.frame_read.frame
