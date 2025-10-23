@@ -122,21 +122,23 @@ class MarkerDetector:
         return ids, poses
 
 class State(enum.Enum):
-    ASCEND_SEARCH      = enum.auto()
-    CENTER_ONE         = enum.auto()
-    SCAN_SECOND        = enum.auto()
-    DECIDE_TARGET      = enum.auto()
-    CENTER_ON_TARGET   = enum.auto()
-    FORWARD_TO_TARGET  = enum.auto()
-    STRAFE_OPPOSITE    = enum.auto()
-    CREEP_FORWARD      = enum.auto()
+    ASCEND_SEARCH        = enum.auto()
+    CENTER_ONE           = enum.auto()
+    SCAN_SECOND          = enum.auto()
+    DECIDE_TARGET        = enum.auto()
+    CENTER_ON_TARGET     = enum.auto()
+    FORWARD_TO_TARGET    = enum.auto()
+    STRAFE_OPPOSITE      = enum.auto()
+    CREEP_FORWARD        = enum.auto()
+    DONE                 = enum.auto()
 
-    DONE               = enum.auto()
     FOLLOW_MARKER_ID     = enum.auto() 
     PASS_UNDER_TABLE_3   = enum.auto() 
     ROTATE_RIGHT_90      = enum.auto() 
     ASCEND_LOCK_4        = enum.auto() 
     OVERBOARD_TO_FIND_5  = enum.auto() 
+
+    ALIGN_Y5_FLIP_LAND   = enum.auto()
 
 @dataclass
 class Context:
@@ -174,7 +176,6 @@ class Context:
 
         # following
         "FOLLOW_ID": 1,             # 要跟隨的 marker
-        "SEARCH_FORWARD_SPEED": 10,  # 看不到 marker 時的前進速度
         "YAW_KP": 0.6,               # 偏航角度(度) → RC yaw 速度的比例
         "YAW_TOL_DEG": 5.0,          # 視為已垂直的角度公差
 
@@ -184,7 +185,10 @@ class Context:
         "ROTATE_DEG": 90,           # 右轉角度
         "OVERBOARD_LR": -15,        # 往左水平移動的 rc 速度
         "OVERBOARD_UD": +8,         # 往上微升的 rc 速度
-        "TRACK_STABLE_N": 5,        # 連續幀數達標才視為穩定       
+        "TRACK_STABLE_N": 5,        # 連續幀數達標才視為穩定  
+
+        "MARKER5_TARGET_Y": 0.0,   # 期望的相機座標系 y 距離（單位同 tvec，通常是 cm）
+        "Y_TOL": 5.0,              # y 距離容許誤差（cm）     
     })
 
 class DroneFSM:
@@ -192,7 +196,6 @@ class DroneFSM:
         self.ctx = ctx
         self.state = State.ASCEND_SEARCH  # ★ 直接從第一步開始（模擬/地面也跑）
         self.strafe_t0 = None
-        self.done_t0 = None          # DONE 用的計時器
         self.handlers = {
             
             State.ASCEND_SEARCH      : self.handle_ASCEND_SEARCH,
@@ -209,6 +212,8 @@ class DroneFSM:
             State.ROTATE_RIGHT_90:        self.handle_ROTATE_RIGHT_90,
             State.ASCEND_LOCK_4:          self.handle_ASCEND_LOCK_4,
             State.OVERBOARD_TO_FIND_5:    self.handle_OVERBOARD_TO_FIND_5,
+
+            State.ALIGN_Y5_FLIP_LAND:     self.handle_ALIGN_Y5_FLIP_LAND,
 
             State.DONE:            self.handle_DONE,
         }
@@ -469,8 +474,8 @@ class DroneFSM:
 
     def handle_FOLLOW_MARKER_ID(self, ctx: Context) -> State:
         """
-        跟隨指定 ID，並在看見 marker 時同時做中心對齊 (x,y)、距離對齊 (z)，
-        並以 yaw 校正讓機頭轉到與 marker 垂直。
+        跟隨指定 ID；若『看不到 FOLLOW_ID、但看到 MARKER_3』→ 立刻轉入 PASS_UNDER_TABLE_3。
+        其他時候依 lab6 風格：x/y/z 用 PID，角度用 calculate_marker_angle 校正旋轉。
         """
         tid = ctx.params["FOLLOW_ID"]
 
@@ -479,21 +484,21 @@ class DroneFSM:
 
         poses = getattr(ctx, "last_poses", {}) or {}
 
-        # === [CHANGED] 新增：提前取出 MARKER_3 id（若未在 params 內，預設 3） ===
+        # === [CHANGED] 先抓 marker3 id（預設 3）
         marker3 = int(ctx.params.get("MARKER_3", 3))  # === [CHANGED] ===
 
+        # === [CHANGED] 分支順序改為：若「看不到 FOLLOW_ID 且 看得到 MARKER_3」→ 直接切狀態
+        if tid not in poses and marker3 in poses:      # === [CHANGED] ===
+            self._follow_stable = 0                    # === [CHANGED] ===
+            self.hover()                               # === [CHANGED] ===
+            return State.PASS_UNDER_TABLE_3            # === [CHANGED] ===
+
         if tid not in poses:
-            # === [CHANGED] 若看不到 FOLLOW_ID，但看得到 MARKER_3，直接切換狀態 ===
-            if marker3 in poses:                                # === [CHANGED] ===
-                self._follow_stable = 0                         # === [CHANGED] ===
-                self.hover()                                    # === [CHANGED] ===
-                return State.PASS_UNDER_TABLE_3                 # === [CHANGED] ===
-            # === [CHANGED] 否則維持原本「緩慢前進」行為 ===
+            # 看不到兩者：維持「緩慢前進」以便重新遇到目標
             self._follow_stable = 0
-            fwd_speed = int(ctx.params.get("SEARCH_FORWARD_SPEED", 10))
-            self.send_rc(0, fwd_speed, 0, 0)
             return State.FOLLOW_MARKER_ID
 
+        # 下面依 lab6 風格做 PID + 角度校正
         rvec, tvec = poses[tid]
         x = float(tvec[0][0])
         y = float(tvec[1][0])
@@ -503,28 +508,31 @@ class DroneFSM:
         err_y = y
         err_z = z - ctx.params["TARGET_Z"]
 
-        lr = int(self.pid_lr.update(err_x, sleep=0.0))
-        ud = int(self.pid_ud.update(err_y, sleep=0.0))
-        fb = int(self.pid_fb.update(err_z, sleep=0.0))
+        # 與 lab6 一致：x→lr, y→ud, z→fb
+        lr = int(ctx.pid_lr.update(err_x, sleep=0.0))
+        ud = int(ctx.pid_ud.update(err_y, sleep=0.0))
+        fb = int(ctx.pid_fb.update(err_z, sleep=0.0))
 
-        # === [CHANGED] 由 rvec 推回偏航角誤差 → 轉成 yaw 速度（保持原本邏輯） ===
-        yaw_err_deg = self._marker_yaw_error_deg_from_rvec(rvec)
-        yaw_kp = float(ctx.params.get("YAW_KP", 0.6))
-        yaw_cmd = int(yaw_kp * yaw_err_deg)
+        marker_angle, _ = calculate_marker_angle(rvec)        # === [CHANGED] ===
+        target_alignment_angle = 0.0                          # === [CHANGED] ===
+        angle_error = marker_angle - target_alignment_angle   # === [CHANGED] ===
+        angle_dead_zone = float(ctx.params.get("YAW_TOL_DEG", 5.0))  # === [CHANGED] ===
+        if abs(angle_error) < angle_dead_zone:                # === [CHANGED] ===
+            angle_error = 0                                   # === [CHANGED] ===
 
-        cap = int(ctx.params["MAX_RC"])
+        cap = int(ctx.params.get("MAX_RC", 25))
         lr  = max(-cap, min(cap, lr))
         ud  = max(-cap, min(cap, ud))
         fb  = max(-cap, min(cap, fb))
-        yaw_cmd = max(-cap, min(cap, yaw_cmd))
+        angle_error = max(-cap, min(cap, angle_error))        # === [CHANGED] ===
 
-        self.send_rc(lr, fb, -ud, yaw_cmd)
+        self.send_rc(lr, fb, -ud, int(-angle_error))          # === [CHANGED] ===
 
-        yaw_tol = float(ctx.params.get("YAW_TOL_DEG", 5.0))
+        # 保留原本「有跟上 FOLLOW_ID 時」的穩定判斷（對 x/y/z/角度）
         if (abs(err_x) <= ctx.params["CENTER_X_TOL"] and
             abs(err_y) <= ctx.params["CENTER_Y_TOL"] and
             abs(err_z) <= ctx.params["Z_TOL"] and
-            abs(yaw_err_deg) <= yaw_tol):
+            abs(angle_error) == 0):
             self._follow_stable += 1
         else:
             self._follow_stable = 0
@@ -537,42 +545,312 @@ class DroneFSM:
         return State.FOLLOW_MARKER_ID
 
 
-
     def handle_PASS_UNDER_TABLE_3(self, ctx: Context) -> State:
         """
-        TODO:
-        - 若偵測到 ctx.params["MARKER_3"]，以 ud<0 下降；可設定安全 z 與最長時間保護。
-        - 穿越完成（例如 z 小於門檻、或計時到）→ ROTATE_RIGHT_90。
+        Pass under table:
+        1. Search for MARKER_3
+        2. Once detected, descend 50cm
+        3. Move forward 2m
+        4. Transition to ROTATE_RIGHT_90
         """
+        frame = ctx.frame_read.frame
+        tid = ctx.params["MARKER_3"]
+        
+        # Initialize phase tracking
+        if not hasattr(self, "_pass_phase"):
+            self._pass_phase = 0  # 0=searching, 1=descending, 2=moving_forward, 3=complete
+            self._pass_t0 = None
+            self._pass_initial_height = None
+        
+        cv2.putText(frame, f"STATE: PASS_UNDER_TABLE_3 (Phase {self._pass_phase})", 
+                    (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+        
+        # Phase 0: Search for MARKER_3
+        if self._pass_phase == 0:
+            poses = getattr(ctx, "last_poses", {}) or {}
+            if tid not in poses:
+                # Keep searching - gentle forward movement
+                self.send_rc(0, 5, 0, 0)  # Slow forward
+                cv2.putText(frame, f"Searching for Marker {tid}...", 
+                           (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 2)
+                return State.PASS_UNDER_TABLE_3
+            
+            # Marker detected! Move to descending phase
+            print(f"[PASS_TABLE] Marker {tid} detected, starting descent")
+            self.hover()
+            time.sleep(0.3)  # Brief pause
+            self._pass_t0 = time.time()
+            self._pass_phase = 1
+            return State.PASS_UNDER_TABLE_3
+        
+        # Phase 1: Descend 50cm (using time-based control)
+        # Assuming descent speed of ~20 cm/s, 50cm takes ~2.5 seconds
+        if self._pass_phase == 1:
+            DESCENT_TIME = 2.5  # seconds for 50cm descent
+            elapsed = time.time() - self._pass_t0
+            
+            if elapsed < DESCENT_TIME:
+                # Continue descending (ud>0 = down)
+                self.send_rc(0, 0, 20, 0)  # Gentle descent
+                cv2.putText(frame, f"Descending... {elapsed:.1f}s / {DESCENT_TIME}s", 
+                           (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
+                return State.PASS_UNDER_TABLE_3
+            
+            # Descent complete, move to forward phase
+            print("[PASS_TABLE] Descent complete, moving forward 2m")
+            self.hover()
+            time.sleep(0.3)  # Brief pause
+            self._pass_t0 = time.time()
+            self._pass_phase = 2
+            return State.PASS_UNDER_TABLE_3
+        
+        # Phase 2: Move forward 2m (200cm)
+        # Assuming forward speed of ~40 cm/s, 200cm takes ~5 seconds
+        if self._pass_phase == 2:
+            FORWARD_TIME = 5.0  # seconds for 2m forward
+            elapsed = time.time() - self._pass_t0
+            
+            if elapsed < FORWARD_TIME:
+                # Continue moving forward
+                self.send_rc(0, 40, 0, 0)  # Moderate forward speed
+                cv2.putText(frame, f"Moving forward... {elapsed:.1f}s / {FORWARD_TIME}s", 
+                           (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
+                return State.PASS_UNDER_TABLE_3
+            
+            # Forward movement complete
+            print("[PASS_TABLE] Passage complete, transitioning to ROTATE_RIGHT_90")
+            self.hover()
+            self._pass_phase = 0  # Reset for next time
+            return State.ROTATE_RIGHT_90
+        
+        # Fallback
         return State.PASS_UNDER_TABLE_3
 
     def handle_ROTATE_RIGHT_90(self, ctx: Context) -> State:
         """
-        TODO:
-        - 以 yaw>0 送速度搭配時間估 90°，或直接呼叫 SDK rotate_clockwise(ctx.params["ROTATE_DEG"])。
-        - 完成後 → ASCEND_LOCK_4。
+        Rotate right 90 degrees:
+        1. Use yaw control to rotate clockwise
+        2. Time-based rotation (assuming ~90 deg/s rotation rate)
+        3. Transition to ASCEND_LOCK_4
         """
+        frame = ctx.frame_read.frame
+        
+        # Initialize rotation tracking
+        if not hasattr(self, "_rotate_phase"):
+            self._rotate_phase = 0  # 0=init, 1=rotating, 2=complete
+            self._rotate_t0 = None
+        
+        cv2.putText(frame, f"STATE: ROTATE_RIGHT_90 (Phase {self._rotate_phase})", 
+                    (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+        
+        # Phase 0: Initialize
+        if self._rotate_phase == 0:
+            print("[ROTATE_RIGHT] Starting 90° clockwise rotation")
+            self.hover()
+            time.sleep(0.3)  # Brief pause before rotation
+            self._rotate_t0 = time.time()
+            self._rotate_phase = 1
+            return State.ROTATE_RIGHT_90
+        
+        # Phase 1: Rotate 90 degrees
+        # Using rotation speed of 30 deg/s, 90° takes ~3 seconds
+        if self._rotate_phase == 1:
+            ROTATE_DEG = ctx.params.get("ROTATE_DEG", 90)
+            ROTATE_SPEED = 30  # Degrees per second
+            ROTATE_TIME = ROTATE_DEG / ROTATE_SPEED  # ~3 seconds for 90°
+            
+            elapsed = time.time() - self._rotate_t0
+            
+            if elapsed < ROTATE_TIME:
+                # Continue rotating clockwise (positive yaw)
+                self.send_rc(0, 0, 0, 30)  # yaw>0 = clockwise
+                cv2.putText(frame, f"Rotating CW... {elapsed:.1f}s / {ROTATE_TIME:.1f}s", 
+                           (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
+                return State.ROTATE_RIGHT_90
+            
+            # Rotation complete
+            print("[ROTATE_RIGHT] 90° rotation complete, moving to ASCEND_LOCK_4")
+            self.hover()
+            self._rotate_phase = 0  # Reset for next time
+            return State.ASCEND_LOCK_4
+        
+        # Fallback
         return State.ROTATE_RIGHT_90
 
     def handle_ASCEND_LOCK_4(self, ctx: Context) -> State:
         """
-        TODO:
-        - 持續微升（ud>0），搜尋並對齊 ctx.params["MARKER_4"]。
-        - 置中判準：|x|,|y| < tol 且連續 ctx.params["TRACK_STABLE_N"] 幀。
-        - 達成後 → OVERBOARD_TO_FIND_5。
+        Ascend while searching for MARKER_4, then lock onto it:
+        1. Continuously ascend (ud<0 = up in your convention)
+        2. When MARKER_4 detected, use PID to center on it
+        3. Maintain centered position for TRACK_STABLE_N frames
+        4. Transition to OVERBOARD_TO_FIND_5
         """
+        frame = ctx.frame_read.frame
+        tid = ctx.params["MARKER_4"]
+        
+        # Initialize tracking
+        if not hasattr(self, "_ascend_stable"):
+            self._ascend_stable = 0
+        
+        cv2.putText(frame, f"STATE: ASCEND_LOCK_4 (find & lock ID={tid})", 
+                    (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+        
+        poses = getattr(ctx, "last_poses", {}) or {}
+        
+        if tid not in poses:
+            # Marker not detected - continue ascending while searching
+            self._ascend_stable = 0
+            ASCEND_SPEED = 15  # Gentle ascent
+            self.send_rc(0, 0, -ASCEND_SPEED, 0)  # ud<0 = up
+            cv2.putText(frame, f"Ascending, searching for Marker {tid}...", 
+                       (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 2)
+            return State.ASCEND_LOCK_4
+        
+        # Marker detected - perform centering with PID
+        rvec, tvec = poses[tid]
+        x = float(tvec[0][0])
+        y = float(tvec[1][0])
+        z = float(tvec[2][0])
+        
+        # Display marker position
+        cv2.putText(frame, f"Marker4: x={x:.1f} y={y:.1f} z={z:.1f}cm", 
+                   (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+        
+        # PID control for centering
+        err_x = x
+        err_y = y
+        
+        lr = int(ctx.pid_lr.update(err_x, sleep=0.0))
+        ud = int(ctx.pid_ud.update(err_y, sleep=0.0))
+        
+        # Speed limiting
+        cap = int(ctx.params["MAX_RC"])
+        lr = max(-cap, min(cap, lr))
+        ud = max(-cap, min(cap, ud))
+        
+        # Send control command (note: ud sign is flipped for camera-to-drone coordinate)
+        self.send_rc(lr, 0, -ud, 0)
+        
+        # Check if centered within tolerance
+        if (abs(err_x) <= ctx.params["CENTER_X_TOL"] and 
+            abs(err_y) <= ctx.params["CENTER_Y_TOL"]):
+            self._ascend_stable += 1
+            cv2.putText(frame, f"Locked! Stable: {self._ascend_stable}/{ctx.params['TRACK_STABLE_N']}", 
+                       (10, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+        else:
+            self._ascend_stable = 0
+            cv2.putText(frame, "Centering on marker...", 
+                       (10, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 2)
+        
+        # Check if stable for required number of frames
+        if self._ascend_stable >= ctx.params["TRACK_STABLE_N"]:
+            print(f"[ASCEND_LOCK_4] Locked on Marker {tid}, moving to OVERBOARD_TO_FIND_5")
+            self.hover()
+            self._ascend_stable = 0  # Reset for next time
+            return State.OVERBOARD_TO_FIND_5
+        
         return State.ASCEND_LOCK_4
 
     def handle_OVERBOARD_TO_FIND_5(self, ctx: Context) -> State:
         """
-        TODO:
-        - 維持微升（ud = params["OVERBOARD_UD"]）與向左水平（lr = params["OVERBOARD_LR"]）。
-        - 一旦偵測到 ctx.params["MARKER_5"]：
-            * 立即 hover，並（若需要）設旗標供 DONE 使用；
-            * 轉移 → DONE。
+        Move left to find MARKER_5:
+        1. Continuously move left (lr<0)
+        2. When MARKER_5 detected, hover and transition to DONE
         """
+        frame = ctx.frame_read.frame
+        tid = ctx.params["MARKER_5"]
+        
+        cv2.putText(frame, f"STATE: OVERBOARD_TO_FIND_5 (searching ID={tid})", 
+                    (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+        
+        poses = getattr(ctx, "last_poses", {}) or {}
+        
+        # Check if MARKER_5 is detected
+        if tid in poses:
+            # Marker 5 found! Hover and transition to DONE
+            print(f"[OVERBOARD] Marker {tid} detected! Transitioning to DONE")
+            self.hover()
+            time.sleep(0.3)  # Brief pause for stability
+            return State.ALIGN_Y5_FLIP_LAND
+        
+        # Marker not detected - continue moving left only
+        lr_speed = ctx.params.get("OVERBOARD_LR", -15)  # Negative = left
+        
+        # Move left without ascending
+        self.send_rc(lr_speed, 0, 0, 0)  # Left only
+        
+        cv2.putText(frame, f"Moving left, searching for Marker {tid}...", 
+                   (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 2)
+        cv2.putText(frame, f"lr={lr_speed}", 
+                   (10, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+        
         return State.OVERBOARD_TO_FIND_5
 
+    # === [CHANGED] 新增：對齊到距離 marker 5 的 Y，翻滾後降落 ===
+    def handle_ALIGN_Y5_FLIP_LAND(self, ctx: Context) -> State:
+        frame = ctx.frame_read.frame
+        cv2.putText(frame, "ALIGN_Y5_FLIP_LAND", (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,255), 2)
+
+        m5 = int(ctx.params.get("MARKER_5", 5))
+        poses = ctx.last_poses or {}
+
+        # 初始化穩定幀計數
+        if not hasattr(self, "_y5_stable"):
+            self._y5_stable = 0
+
+        # 沒看到 marker 5：保持懸停（或可依需求微調前進/上升）
+        if m5 not in poses:
+            self._y5_stable = 0
+            self.hover()
+            return State.ALIGN_Y5_FLIP_LAND
+
+        # 讀取 y 距離並與目標比較（OpenCV 相機座標：y 往下為正）
+        rvec, tvec = poses[m5]
+        y_cur = float(tvec[1][0])                       # 目前相機座標系下的 y（cm）
+        y_set = float(ctx.params["MARKER5_TARGET_Y"])   # 期望 y（cm）
+        err_y = y_cur - y_set                           # 正值→需要向上或向下：交給 PID 決定
+
+        # 只調整上下（ud），其餘維持 0；你也可加上 x/z 保持對齊，這裡依需求最小化
+        ud = int(ctx.pid_ud.update(err_y, sleep=0.0))
+        ud = self.clip(ud)
+        self.send_rc(0, 0, -ud, 0)   # 注意你的慣例：RC 要送 -ud
+
+        # 判斷是否到目標 y（用 Y_TOL，並可疊加 TRACK_STABLE_N 框定）
+        y_tol = float(ctx.params.get("Y_TOL", 5.0))
+        if abs(err_y) <= y_tol:
+            self._y5_stable += 1
+        else:
+            self._y5_stable = 0
+
+        if self._y5_stable >= int(ctx.params.get("TRACK_STABLE_N", 3)):
+            # 對齊完成：停止，翻滾一次，然後降落
+            self.hover()
+            self._y5_stable = 0
+            self.reset_pids()
+
+            # 翻滾（模擬模式只記錄文字；真機則呼叫 flip）
+            if ctx.simulation or not ctx.airborne:
+                self._record_cmd("[SIM MOVE] flip forward")
+            else:
+                try:
+                    ctx.drone.flip('f')   # 'f','b','l','r' 依需求可改
+                except Exception as e:
+                    print("flip failed:", e)
+
+            # 降落
+            if ctx.simulation or not ctx.airborne:
+                self._record_cmd("[SIM MOVE] land")
+            else:
+                try:
+                    ctx.drone.land()
+                    ctx.airborne = False
+                except Exception as e:
+                    print("land failed:", e)
+
+            return State.DONE
+
+        return State.ALIGN_Y5_FLIP_LAND
 
     def handle_DONE(self, ctx: Context) -> State:  # move forward and land
         return State.DONE
