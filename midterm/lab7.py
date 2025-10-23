@@ -122,14 +122,19 @@ class MarkerDetector:
         return ids, poses
 
 class State(enum.Enum):
-    ASCEND_SEARCH      = 0
-    CENTER_ONE         = 1
-    SCAN_SECOND        = 2    
-    DECIDE_TARGET      = 3
-    CENTER_ON_TARGET   = 4
-    FORWARD_TO_TARGET  = 5
-    STRAFE_OPPOSITE    = 6
-    CREEP_FORWARD      = 7
+    ASCEND_SEARCH_1      = enum.auto()
+    CENTER_ON_1          = enum.auto()
+    STRAFE_TO_FIND_2     = enum.auto()
+    CENTER_ON_2          = enum.auto()
+    FORWARD_TO_TARGET    = enum.auto()
+    STRAFE_LEFT          = enum.auto()
+    DONE                 = enum.auto()
+
+    FOLLOW_MARKER_ID     = enum.auto() 
+    PASS_UNDER_TABLE_3   = enum.auto() 
+    ROTATE_RIGHT_90      = enum.auto() 
+    ASCEND_LOCK_4        = enum.auto() 
+    OVERBOARD_TO_FIND_5  = enum.auto() 
 
 @dataclass
 class Context:
@@ -162,7 +167,22 @@ class Context:
         "CREEP_FB": 12,           # 慢速前進 RC
         "MAX_RC": 40,
         "OPPOSITE_STRAFE_SIGN": 0, # 之後決定
-        "PHASE": 0              # 掃描階段計數器
+        "PHASE": 0,             # 掃描階段計數器
+
+
+        # following
+        "FOLLOW_ID": 2,             # 要跟隨的 marker
+        "SEARCH_FORWARD_SPEED": 10,  # 看不到 marker 時的前進速度
+        "YAW_KP": 0.6,               # 偏航角度(度) → RC yaw 速度的比例
+        "YAW_TOL_DEG": 5.0,          # 視為已垂直的角度公差
+
+        "MARKER_3": 3,              # 穿桌用的 marker
+        "MARKER_4": 4,              # 牆上定位用的 marker
+        "MARKER_5": 5,              # 終點判斷用的 marker
+        "ROTATE_DEG": 90,           # 右轉角度
+        "OVERBOARD_LR": -15,        # 往左水平移動的 rc 速度
+        "OVERBOARD_UD": +8,         # 往上微升的 rc 速度
+        "TRACK_STABLE_N": 5,        # 連續幀數達標才視為穩定       
     })
 
 class DroneFSM:
@@ -180,6 +200,14 @@ class DroneFSM:
             State.FORWARD_TO_TARGET  : self.handle_FORWARD_TO_TARGET,
             State.STRAFE_OPPOSITE    : self.handle_STRAFE_OPPOSITE,
             State.CREEP_FORWARD      : self.handle_CREEP_FORWARD,
+
+            State.FOLLOW_MARKER_ID:       self.handle_FOLLOW_MARKER_ID,
+            State.PASS_UNDER_TABLE_3:     self.handle_PASS_UNDER_TABLE_3,
+            State.ROTATE_RIGHT_90:        self.handle_ROTATE_RIGHT_90,
+            State.ASCEND_LOCK_4:          self.handle_ASCEND_LOCK_4,
+            State.OVERBOARD_TO_FIND_5:    self.handle_OVERBOARD_TO_FIND_5,
+
+            State.DONE:            self.handle_DONE,
         }
         self.blocking_running = False
 
@@ -429,6 +457,110 @@ class DroneFSM:
 
         self.send_rc(0, ctx.params["CREEP_FB"], 0, 0)
         return State.CREEP_FORWARD
+
+    
+    def handle_FOLLOW_MARKER_ID(self, ctx: Context) -> State:
+        """
+        跟隨指定 ID，並在看見 marker 時同時做中心對齊 (x,y)、距離對齊 (z)，
+        並以 yaw 校正讓機頭轉到與 marker 垂直。
+        """
+        tid = ctx.params["FOLLOW_ID"]
+
+        if not hasattr(self, "_follow_stable"):
+            self._follow_stable = 0
+
+        poses = getattr(ctx, "last_poses", {}) or {}
+        if tid not in poses:
+            # 看不到 marker：改為「緩慢前進」
+            self._follow_stable = 0
+            fwd_speed = int(ctx.params.get("SEARCH_FORWARD_SPEED", 10))
+            self.send_rc(0, fwd_speed, 0, 0)
+            return State.FOLLOW_MARKER_ID
+
+        rvec, tvec = poses[tid]
+        x = float(tvec[0][0])
+        y = float(tvec[1][0])
+        z = float(tvec[2][0])
+
+        err_x = x
+        err_y = y
+        err_z = z - ctx.params["TARGET_Z"]
+
+        lr = int(self.pid_lr.update(err_x, sleep=0.0))
+        ud = int(self.pid_ud.update(err_y, sleep=0.0))
+        fb = int(self.pid_fb.update(err_z, sleep=0.0))
+
+        # === [CHANGED] 新增：由 rvec 推回偏航角誤差 → 轉成 yaw 速度 ===
+        yaw_err_deg = self._marker_yaw_error_deg_from_rvec(rvec)
+        yaw_kp = float(ctx.params.get("YAW_KP", 0.6))
+        yaw_cmd = int(yaw_kp * yaw_err_deg)
+
+        # 速度限幅
+        cap = int(ctx.params["MAX_RC"])
+        lr  = max(-cap, min(cap, lr))
+        ud  = max(-cap, min(cap, ud))
+        fb  = max(-cap, min(cap, fb))
+        yaw_cmd = max(-cap, min(cap, yaw_cmd))  # === [CHANGED] ===
+
+        # 實際送 RC；注意相機 y 與 RC z 的號誌
+        self.send_rc(lr, fb, -ud, yaw_cmd)  # === [CHANGED] ===
+
+        # 穩定達標檢查（多加一個 yaw 公差門檻）
+        yaw_tol = float(ctx.params.get("YAW_TOL_DEG", 5.0))  # === [CHANGED] ===
+        if (abs(err_x) <= ctx.params["CENTER_X_TOL"] and
+            abs(err_y) <= ctx.params["CENTER_Y_TOL"] and
+            abs(err_z) <= ctx.params["Z_TOL"] and
+            abs(yaw_err_deg) <= yaw_tol):  # === [CHANGED] ===
+            self._follow_stable += 1
+        else:
+            self._follow_stable = 0
+
+        if self._follow_stable >= ctx.params["TRACK_STABLE_N"]:
+            self.hover()
+            self._follow_stable = 0
+            return State.PASS_UNDER_TABLE_3
+
+        return State.FOLLOW_MARKER_ID
+
+
+    def handle_PASS_UNDER_TABLE_3(self, ctx: Context) -> State:
+        """
+        TODO:
+        - 若偵測到 ctx.params["MARKER_3"]，以 ud<0 下降；可設定安全 z 與最長時間保護。
+        - 穿越完成（例如 z 小於門檻、或計時到）→ ROTATE_RIGHT_90。
+        """
+        return State.PASS_UNDER_TABLE_3
+
+    def handle_ROTATE_RIGHT_90(self, ctx: Context) -> State:
+        """
+        TODO:
+        - 以 yaw>0 送速度搭配時間估 90°，或直接呼叫 SDK rotate_clockwise(ctx.params["ROTATE_DEG"])。
+        - 完成後 → ASCEND_LOCK_4。
+        """
+        return State.ROTATE_RIGHT_90
+
+    def handle_ASCEND_LOCK_4(self, ctx: Context) -> State:
+        """
+        TODO:
+        - 持續微升（ud>0），搜尋並對齊 ctx.params["MARKER_4"]。
+        - 置中判準：|x|,|y| < tol 且連續 ctx.params["TRACK_STABLE_N"] 幀。
+        - 達成後 → OVERBOARD_TO_FIND_5。
+        """
+        return State.ASCEND_LOCK_4
+
+    def handle_OVERBOARD_TO_FIND_5(self, ctx: Context) -> State:
+        """
+        TODO:
+        - 維持微升（ud = params["OVERBOARD_UD"]）與向左水平（lr = params["OVERBOARD_LR"]）。
+        - 一旦偵測到 ctx.params["MARKER_5"]：
+            * 立即 hover，並（若需要）設旗標供 DONE 使用；
+            * 轉移 → DONE。
+        """
+        return State.OVERBOARD_TO_FIND_5
+
+
+    def handle_DONE(self, ctx: Context) -> State:  # move forward and land
+
     
 
 
