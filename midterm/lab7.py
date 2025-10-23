@@ -163,7 +163,7 @@ class Context:
         "SEARCH_RIGHT_SPEED": 30,
         "CENTER_X_TOL": 15.0,
         "CENTER_Y_TOL": 15.0,
-        "TARGET_Z": 70.0,
+        "TARGET_Z": 90.0,
         "Z_TOL": 8.0,
         "STRAFE_LEFT_CM": 70,
         "STRAFE_RC": 35,          # 側移 RC 速度
@@ -197,7 +197,7 @@ class Context:
 class DroneFSM:
     def __init__(self, ctx: Context):
         self.ctx = ctx
-        self.state = State.ASCEND_SEARCH  # ★ 直接從第一步開始（模擬/地面也跑）
+        self.state = State.PASS_UNDER_TABLE_3  # ★ 直接從第一步開始（模擬/地面也跑）
         self.strafe_t0 = None
         self.handlers = {
             
@@ -560,7 +560,7 @@ class DroneFSM:
         elif angle_error < -max_speed_threshold:
             angle_error = -max_speed_threshold
         
-        self.ctx.drone.send_rc_control(int(yaw_update), int(fb_update), int(-ud_update), int(-angle_error))
+        self.send_rc(int(yaw_update), int(fb_update), int(-ud_update), int(-angle_error))
         return State.FOLLOW_MARKER_ID
 
 
