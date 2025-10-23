@@ -177,8 +177,7 @@ class Context:
 
         # following
         "FOLLOW_ID": 1,             # 要跟隨的 marker
-        "YAW_KP": 0.6,               # 偏航角度(度) → RC yaw 速度的比例
-        "YAW_TOL_DEG": 5.0,          # 視為已垂直的角度公差
+        "FOLLOW_DIS": 60.0,
 
         "MARKER_3": 3,              # 穿桌用的 marker
         "MARKER_4": 4,              # 牆上定位用的 marker
@@ -191,13 +190,13 @@ class Context:
         "MARKER5_TARGET_Y": 0.0,   # 期望的相機座標系 y 距離（單位同 tvec，通常是 cm）
         "Y_TOL": 5.0,              # y 距離容許誤差（cm）     
 
-        "FOLLOW_DIS": 80.0
+
     })
 
 class DroneFSM:
     def __init__(self, ctx: Context):
         self.ctx = ctx
-        self.state = State.ASCEND_SEARCH  # ★ 直接從第一步開始（模擬/地面也跑）
+        self.state = State.CREEP_FORWARD
         self.strafe_t0 = None
         self.handlers = {
             
@@ -487,6 +486,7 @@ class DroneFSM:
             return State.PASS_UNDER_TABLE_3
 
         if tid not in poses:
+            self.hover()   
             return State.FOLLOW_MARKER_ID  
         
         rvec, tvec = poses[tid]
@@ -500,6 +500,7 @@ class DroneFSM:
         error_x = x  # Left/Right error
         error_y = y  # Up/Down error
         error_z = z - target_dist  # Forward/Back error (target 80cm)
+        print(error_z)
         
         
         # Step 2: Use PID to get control outputs
@@ -548,7 +549,7 @@ class DroneFSM:
         elif angle_error < -max_speed_threshold:
             angle_error = -max_speed_threshold
         
-        self.ctx.drone.send_rc_control(int(yaw_update), int(fb_update), int(-ud_update), int(-angle_error))
+        self.send_rc(int(yaw_update), int(fb_update), int(-ud_update), int(-angle_error))
         return State.FOLLOW_MARKER_ID
 
 
@@ -895,6 +896,8 @@ def main():
         try: drone.send_rc_control(0, 0, 0, 0)
         except: pass
         fsm.run()
+    except Exception as ex:
+        print(ex)
     finally:
         try: drone.send_rc_control(0, 0, 0, 0)
         except: pass
