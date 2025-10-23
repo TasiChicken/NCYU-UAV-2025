@@ -226,7 +226,7 @@ class DroneFSM:
     def send_rc(self, lr: float, fb: float, ud: float, yaw: float):
         lr, fb, ud, yaw = map(self.clip, (lr, fb, ud, yaw))
         if self.ctx.simulation or not self.ctx.airborne:
-            # self._record_cmd(f"[SIM RC] lr:{lr} fb:{fb} ud:{ud} yaw:{yaw}")
+            self._record_cmd(f"[SIM RC] lr:{lr} fb:{fb} ud:{ud} yaw:{yaw}")
             return
         self.ctx.drone.send_rc_control(lr, fb, ud, yaw)
 
@@ -323,7 +323,7 @@ class DroneFSM:
             return State.CENTER_ONE
 
         # 依你的約定 ud<0 上升
-        self.send_rc(0, 0, -ctx.params["ASCENT_SPEED"], 0)
+        self.send_rc(0, 0, ctx.params["ASCENT_SPEED"], 0)
         return State.ASCEND_SEARCH
     def handle_CENTER_ONE(self, ctx):
         frame = ctx.frame_read.frame
