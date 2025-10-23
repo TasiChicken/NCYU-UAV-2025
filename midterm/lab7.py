@@ -155,25 +155,17 @@ class Context:
     params: dict = field(default_factory=lambda: {
         "ID1": 1,
         "ID2": 2,
-        "TARGET_ID": None,
-        "ASCENT_SPEED": 40,        
-        "SEARCH_RIGHT_SPEED": 30,
+        "ASCENT_SPEED": -20,        # 依你的慣例 ud<0 上升
+        "SEARCH_RIGHT_SPEED": 20,
         "CENTER_X_TOL": 15.0,
         "CENTER_Y_TOL": 15.0,
-        "TARGET_Z": 70.0,
+        "TARGET_Z": 50.0,
         "Z_TOL": 8.0,
         "STRAFE_LEFT_CM": 70,
-        "STRAFE_RC": 35,          # 側移 RC 速度
-        "STRAFE_TIME_1M": 2.2,    # 估 2.2 秒 ≈ 1m（需實機校正）
-        "STRAFE_TIME_SCAN": 1.0,   # 側移掃描時間
-        "CREEP_FB": 12,           # 慢速前進 RC
-        "MAX_RC": 40,
-        "OPPOSITE_STRAFE_SIGN": 0, # 之後決定
-        "PHASE": 0,             # 掃描階段計數器
-
+        "MAX_RC": 25
 
         # following
-        "FOLLOW_ID": 1,             # 要跟隨的 marker
+        "FOLLOW_ID": 2,             # 要跟隨的 marker
         "SEARCH_FORWARD_SPEED": 10,  # 看不到 marker 時的前進速度
         "YAW_KP": 0.6,               # 偏航角度(度) → RC yaw 速度的比例
         "YAW_TOL_DEG": 5.0,          # 視為已垂直的角度公差
