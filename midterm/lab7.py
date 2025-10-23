@@ -122,14 +122,15 @@ class MarkerDetector:
         return ids, poses
 
 class State(enum.Enum):
-    ASCEND_SEARCH_1      = enum.auto()
-    CENTER_ON_1          = enum.auto()
-    STRAFE_TO_FIND_2     = enum.auto()
-    CENTER_ON_2          = enum.auto()
-    FORWARD_TO_TARGET    = enum.auto()
-    STRAFE_LEFT          = enum.auto()
-    DONE                 = enum.auto()
+    CENTER_ONE         = enum.auto()
+    SCAN_SECOND        = enum.auto()
+    DECIDE_TARGET      = enum.auto()
+    CENTER_ON_TARGET   = enum.auto()
+    FORWARD_TO_TARGET  = enum.auto()
+    STRAFE_OPPOSITE    = enum.auto()
+    CREEP_FORWARD      = enum.auto()
 
+    DONE               = enum.auto()
     FOLLOW_MARKER_ID     = enum.auto() 
     PASS_UNDER_TABLE_3   = enum.auto() 
     ROTATE_RIGHT_90      = enum.auto() 
@@ -192,6 +193,7 @@ class DroneFSM:
         self.strafe_t0 = None
         self.done_t0 = None          # DONE 用的計時器
         self.handlers = {
+            
             State.ASCEND_SEARCH      : self.handle_ASCEND_SEARCH,
             State.CENTER_ONE         : self.handle_CENTER_ONE,
             State.SCAN_SECOND        : self.handle_SCAN_SECOND,
@@ -456,6 +458,10 @@ class DroneFSM:
         cv2.putText(frame, "CREEP_FORWARD", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,255), 2)
 
         self.send_rc(0, ctx.params["CREEP_FB"], 0, 0)
+
+        if ctx.last_ids is not None and ctx.params["FOLLOW_ID"] in ctx.last_poses:
+            return State.FOLLOW_MARKER_ID
+        
         return State.CREEP_FORWARD
 
     
@@ -560,7 +566,7 @@ class DroneFSM:
 
 
     def handle_DONE(self, ctx: Context) -> State:  # move forward and land
-
+        return State.DONE
     
 
 
