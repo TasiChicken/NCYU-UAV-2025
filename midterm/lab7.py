@@ -27,7 +27,7 @@ def keyboard(drone: Tello, key: int, airborne: bool, simulation: bool):
     if key == -1:
         return False, None, None
 
-    print("key:", key)
+    # print("key:", key)
     fb_speed, lf_speed, ud_speed, degree = 40, 40, 50, 30
     is_move = False
     airborne_changed = None
@@ -121,20 +121,22 @@ class MarkerDetector:
                     poses[int(mid)] = (rvec, tvec)
         return ids, poses
 
-class State(Enum):
-    ASCEND_SEARCH_1      = auto()
-    CENTER_ON_1          = auto()
-    STRAFE_TO_FIND_2     = auto()
-    CENTER_ON_2          = auto()
-    FORWARD_TO_TARGET    = auto()
-    STRAFE_LEFT          = auto()
-    DONE                 = auto()
+class State(enum.Enum):
+    ASCEND_SEARCH      = enum.auto()
+    CENTER_ONE         = enum.auto()
+    SCAN_SECOND        = enum.auto()
+    DECIDE_TARGET      = enum.auto()
+    CENTER_ON_TARGET   = enum.auto()
+    FORWARD_TO_TARGET  = enum.auto()
+    STRAFE_OPPOSITE    = enum.auto()
+    CREEP_FORWARD      = enum.auto()
 
-    FOLLOW_MARKER_ID     = auto() 
-    PASS_UNDER_TABLE_3   = auto() 
-    ROTATE_RIGHT_90      = auto() 
-    ASCEND_LOCK_4        = auto() 
-    OVERBOARD_TO_FIND_5  = auto() 
+    DONE               = enum.auto()
+    FOLLOW_MARKER_ID     = enum.auto() 
+    PASS_UNDER_TABLE_3   = enum.auto() 
+    ROTATE_RIGHT_90      = enum.auto() 
+    ASCEND_LOCK_4        = enum.auto() 
+    OVERBOARD_TO_FIND_5  = enum.auto() 
 
 @dataclass
 class Context:
@@ -153,17 +155,25 @@ class Context:
     params: dict = field(default_factory=lambda: {
         "ID1": 1,
         "ID2": 2,
-        "ASCENT_SPEED": -20,        # 依你的慣例 ud<0 上升
-        "SEARCH_RIGHT_SPEED": 20,
+        "TARGET_ID": None,
+        "ASCENT_SPEED": 40,        
+        "SEARCH_RIGHT_SPEED": 30,
         "CENTER_X_TOL": 15.0,
         "CENTER_Y_TOL": 15.0,
-        "TARGET_Z": 50.0,
+        "TARGET_Z": 70.0,
         "Z_TOL": 8.0,
         "STRAFE_LEFT_CM": 70,
-        "MAX_RC": 25
+        "STRAFE_RC": 35,          # 側移 RC 速度
+        "STRAFE_TIME_1M": 2.2,    # 估 2.2 秒 ≈ 1m（需實機校正）
+        "STRAFE_TIME_SCAN": 1.0,   # 側移掃描時間
+        "CREEP_FB": 12,           # 慢速前進 RC
+        "MAX_RC": 40,
+        "OPPOSITE_STRAFE_SIGN": 0, # 之後決定
+        "PHASE": 0,             # 掃描階段計數器
+
 
         # following
-        "FOLLOW_ID": 2,             # 要跟隨的 marker
+        "FOLLOW_ID": 1,             # 要跟隨的 marker
         "SEARCH_FORWARD_SPEED": 10,  # 看不到 marker 時的前進速度
         "YAW_KP": 0.6,               # 偏航角度(度) → RC yaw 速度的比例
         "YAW_TOL_DEG": 5.0,          # 視為已垂直的角度公差
@@ -180,17 +190,19 @@ class Context:
 class DroneFSM:
     def __init__(self, ctx: Context):
         self.ctx = ctx
-        self.state = State.ASCEND_SEARCH_1  # ★ 直接從第一步開始（模擬/地面也跑）
+        self.state = State.FOLLOW_MARKER_ID  # ★ 直接從第一步開始（模擬/地面也跑）
         self.strafe_t0 = None
         self.done_t0 = None          # DONE 用的計時器
-        self.done_phase = 0          # 0:init, 1:forwarding, 2:landing, 3:finished
         self.handlers = {
-            State.ASCEND_SEARCH_1: self.handle_ASCEND_SEARCH_1,
-            State.CENTER_ON_1:     self.handle_CENTER_ON_1,
-            State.STRAFE_TO_FIND_2:self.handle_STRAFE_TO_FIND_2,
-            State.CENTER_ON_2:     self.handle_CENTER_ON_2,
-            State.FORWARD_TO_TARGET:self.handle_FORWARD_TO_TARGET,
-            State.STRAFE_LEFT:     self.handle_STRAFE_LEFT,
+            
+            State.ASCEND_SEARCH      : self.handle_ASCEND_SEARCH,
+            State.CENTER_ONE         : self.handle_CENTER_ONE,
+            State.SCAN_SECOND        : self.handle_SCAN_SECOND,
+            State.DECIDE_TARGET      : self.handle_DECIDE_TARGET,
+            State.CENTER_ON_TARGET   : self.handle_CENTER_ON_TARGET,
+            State.FORWARD_TO_TARGET  : self.handle_FORWARD_TO_TARGET,
+            State.STRAFE_OPPOSITE    : self.handle_STRAFE_OPPOSITE,
+            State.CREEP_FORWARD      : self.handle_CREEP_FORWARD,
 
             State.FOLLOW_MARKER_ID:       self.handle_FOLLOW_MARKER_ID,
             State.PASS_UNDER_TABLE_3:     self.handle_PASS_UNDER_TABLE_3,
@@ -207,7 +219,7 @@ class DroneFSM:
         return int(max(-m, min(m, v)))
 
     def _record_cmd(self, text: str):
-        print(text)
+        # print(text)
         self.ctx.last_cmd_texts.clear()
         self.ctx.last_cmd_texts.append(text)
 
@@ -229,29 +241,10 @@ class DroneFSM:
             self._record_cmd(f"[SIM MOVE] move_left {cm}cm")
             return
         self.ctx.drone.move_left(cm)
-
     def reset_pids(self):
         self.ctx.pid_lr.initialize()
         self.ctx.pid_ud.initialize()
         self.ctx.pid_fb.initialize()
-
-    def _marker_yaw_error_deg_from_rvec(self, rvec):
-        """
-        Calculate yaw angle error between drone and marker.
-        Returns angle in degrees: positive = need to rotate CW, negative = CCW
-        """
-        angle_deg, _ = calculate_marker_angle(rvec)
-        
-        # Normalize to [-180, 180]
-        while angle_deg > 180:
-            angle_deg -= 360
-        while angle_deg < -180:
-            angle_deg += 360
-        
-        # The angle represents how much the marker is rotated in the image
-        # We want to align perpendicular to it, so this is our error
-        return angle_deg
-
     def run(self):
         print(f"[FSM] Start at {self.state.name} | SIMULATION={self.ctx.simulation}")
         while True:
@@ -311,132 +304,171 @@ class DroneFSM:
 
         cv2.destroyAllWindows()
 
-    # ------- handlers -------
-    def handle_ASCEND_SEARCH_1(self, ctx: Context) -> State:
+    def _pick_farther_id(self, poses: Dict[int, Tuple[np.ndarray,np.ndarray]]) -> Optional[int]:
+        # 用 z（越大越遠）；也可改 np.linalg.norm(tvec)
+        best_id, best_z = None, -1
+        for mid, (_, tvec) in poses.items():
+            if mid in self.ids_candidates:
+                z = float(tvec[2][0])
+                if z > best_z:
+                    best_z, best_id = z, mid
+        return best_id
+    
+    # Handlers for each state
+    def handle_ASCEND_SEARCH(self, ctx):
         frame = ctx.frame_read.frame
-        cv2.putText(frame, f"STATE: ASCEND_SEARCH_1 (find ID={ctx.params['ID1']})",
-                    (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+        cv2.putText(frame, "ASCEND_SEARCH", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,255), 2)
 
-        if ctx.last_ids is not None and ctx.params["ID1"] in ctx.last_poses:
-            self.reset_pids()
-            self.hover()
-            return State.CENTER_ON_1
+        if ctx.last_ids is not None and (ctx.params["ID1"] in ctx.last_poses or ctx.params["ID2"] in ctx.last_poses):
+            return State.CENTER_ONE
 
-        # 模擬或真飛都會「計算並顯示」要送的上升指令
-        self.send_rc(0, 0, -ctx.params["ASCENT_SPEED"], 0)
-        return State.ASCEND_SEARCH_1
-
-    def handle_CENTER_ON_1(self, ctx: Context) -> State:
+        # 依你的約定 ud<0 上升
+        self.send_rc(0, 0, ctx.params["ASCENT_SPEED"], 0)
+        return State.ASCEND_SEARCH
+    def handle_CENTER_ONE(self, ctx):
         frame = ctx.frame_read.frame
-        tid = ctx.params["ID1"]
-        cv2.putText(frame, f"STATE: CENTER_ON_1 (ID={tid})", (10, 90),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+        cv2.putText(frame, "CENTER_ONE", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,255), 2)
 
-        if ctx.last_ids is None or tid not in ctx.last_poses:
-            self.hover()
-            return State.ASCEND_SEARCH_1
-
+        ids = ctx.last_ids
+        if ids is None:
+            return State.ASCEND_SEARCH
+        
+        #if seen both
+        if ctx.params["ID1"] in ctx.last_poses and ctx.params["ID2"] in ctx.last_poses:
+            return State.DECIDE_TARGET
+        #if seen one, center on it
+        vis_ids = [i for i in [ctx.params["ID1"], ctx.params["ID2"]] if i in ctx.last_poses]
+        tid = vis_ids[0]
         rvec, tvec = ctx.last_poses[tid]
         x, y, z = tvec[0][0], tvec[1][0], tvec[2][0]
-        lr_out = ctx.pid_lr.update(x, sleep=0.0)
-        ud_out = ctx.pid_ud.update(y, sleep=0.0)
-        self.send_rc(lr_out, 0, -ud_out, 0)
-
-        if abs(x) <= ctx.params["CENTER_X_TOL"] and abs(y) <= ctx.params["CENTER_Y_TOL"]:
-            self.reset_pids()
-            self.hover()
-            return State.STRAFE_TO_FIND_2
-        return State.CENTER_ON_1
-
-    def handle_STRAFE_TO_FIND_2(self, ctx: Context) -> State:
+        lr = ctx.pid_lr.update(x, 0.0)
+        ud = ctx.pid_ud.update(y, 0.0)
+        self.send_rc(lr, 0, -ud, 0)
+        #check if centered
+        if abs(x) < ctx.params["CENTER_X_TOL"] and abs(y) < ctx.params["CENTER_Y_TOL"]:
+            return State.SCAN_SECOND
+        return State.CENTER_ONE
+    
+    def handle_SCAN_SECOND(self, ctx):
         frame = ctx.frame_read.frame
-        cv2.putText(frame, "STATE: STRAFE_TO_FIND_2 (right to find ID=2)", (10, 90),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+        cv2.putText(frame, "SCAN_SECOND", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,255), 2)
 
-        if ctx.last_ids is not None and ctx.params["ID2"] in ctx.last_poses:
-            self.hover()
-            self.reset_pids()
-            return State.CENTER_ON_2
-
-        self.send_rc(ctx.params["SEARCH_RIGHT_SPEED"], 0, 0, 0)
-        return State.STRAFE_TO_FIND_2
-
-    def handle_CENTER_ON_2(self, ctx: Context) -> State:
+        ids = ctx.last_ids
+        if ids is None:
+            return State.ASCEND_SEARCH
+        
+        #if seen both
+        if ctx.params["ID1"] in ctx.last_poses and ctx.params["ID2"] in ctx.last_poses:
+            self.strafe_t0 = None #reset strafe timer
+            return State.DECIDE_TARGET
+        
+        # go left and go right to scan
+        v = ctx.params["STRAFE_RC"]
+        phase = ctx.params["PHASE"]
+        sign = 1 if phase % 2 == 0 else -1
+        self.send_rc(sign * v, 0, 0, 0)  
+        if self.strafe_t0 is None:
+            self.strafe_t0 = time.time()
+        if time.time() - self.strafe_t0 > ctx.params["STRAFE_TIME_SCAN"]:
+            ctx.params["PHASE"] += 1 
+            self.strafe_t0 = time.time()
+        return State.SCAN_SECOND
+    
+    def handle_DECIDE_TARGET(self, ctx):
         frame = ctx.frame_read.frame
-        tid = ctx.params["ID2"]
-        cv2.putText(frame, f"STATE: CENTER_ON_2 (ID={tid})", (10, 90),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+        cv2.putText(frame, "DECIDE_TARGET", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,255), 2)
 
-        if ctx.last_ids is None or tid not in ctx.last_poses:
-            self.hover()
-            return State.STRAFE_TO_FIND_2
+        poses = ctx.last_poses
+        id1_in = ctx.params["ID1"] in poses
+        id2_in = ctx.params["ID2"] in poses
+        if not (id1_in and id2_in):
+            return State.ASCEND_SEARCH
 
-        rvec, tvec = ctx.last_poses[tid]
+        # 1) 選較遠的目標
+        self.ids_candidates = [ctx.params["ID1"], ctx.params["ID2"]]
+        target_id = self._pick_farther_id(poses)
+        if target_id is None:
+            return State.ASCEND_SEARCH
+
+        ctx.params["TARGET_ID"] = target_id
+
+        # 2) 依目標當下的左右位置，決定「丟失時要側移的相反方向」
+        #    x>0 = 目標在右 → 丟失時往左掃（-1）；x<0 = 目標在左 → 丟失時往右掃（+1）
+        x_far = float(poses[target_id][1][0][0])
+        if x_far > 0:
+            ctx.params["OPPOSITE_STRAFE_SIGN"] = -1   # 之後 recover/scan 用：左
+        else:
+            ctx.params["OPPOSITE_STRAFE_SIGN"] = +1   # 之後 recover/scan 用：右
+
+        return State.CENTER_ON_TARGET
+    
+    def handle_CENTER_ON_TARGET(self, ctx):
+        frame = ctx.frame_read.frame
+        cv2.putText(frame, "CENTER_ON_TARGET", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,255), 2)
+
+        target_id = ctx.params["TARGET_ID"]
+        if target_id not in ctx.last_poses:
+            return State.ASCEND_SEARCH
+
+        rvec, tvec = ctx.last_poses[target_id]
         x, y, z = tvec[0][0], tvec[1][0], tvec[2][0]
-        lr_out = ctx.pid_lr.update(x, sleep=0.0)
-        ud_out = ctx.pid_ud.update(y, sleep=0.0)
-        self.send_rc(lr_out, 0, -ud_out, 0)
-
-        if abs(x) <= ctx.params["CENTER_X_TOL"] and abs(y) <= ctx.params["CENTER_Y_TOL"]:
+        lr = ctx.pid_lr.update(x, 0.0)
+        ud = ctx.pid_ud.update(y, 0.0)
+        fb = ctx.pid_fb.update(z - ctx.params["TARGET_Z"], sleep=0.0)
+        self.send_rc(lr, fb, -ud, 0)
+        #check if centered
+        if abs(x) < ctx.params["CENTER_X_TOL"] and abs(y) < ctx.params["CENTER_Y_TOL"] and abs(z - ctx.params["TARGET_Z"]) < ctx.params["Z_TOL"]:
             self.reset_pids()
             return State.FORWARD_TO_TARGET
-        return State.CENTER_ON_2
-
-    def handle_FORWARD_TO_TARGET(self, ctx: Context) -> State:
+        return State.CENTER_ON_TARGET
+    
+    def handle_FORWARD_TO_TARGET(self, ctx):
         frame = ctx.frame_read.frame
-        tid = ctx.params["ID2"]
-        cv2.putText(frame, "STATE: FORWARD_TO_TARGET", (10, 90),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+        cv2.putText(frame, "FORWARD_TO_TARGET", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,255), 2)
 
-        if ctx.last_ids is None or tid not in ctx.last_poses:
-            self.hover()
-            return State.STRAFE_LEFT
+        target_id = ctx.params["TARGET_ID"]
+        if target_id not in ctx.last_poses: #go too far, lost target, still go opposite
+            return State.STRAFE_OPPOSITE
 
-        rvec, tvec = ctx.last_poses[tid]
-        x, y, z = tvec[0][0], tvec[1][0], tvec[2][0]
-        lr_out = ctx.pid_lr.update(x, sleep=0.0)
-        ud_out = ctx.pid_ud.update(y, sleep=0.0)
-        fb_out = ctx.pid_fb.update(z - ctx.params["TARGET_Z"], sleep=0.0)
-        self.send_rc(lr_out, fb_out, -ud_out, 0)
-
-        if abs(z - ctx.params["TARGET_Z"]) <= ctx.params["Z_TOL"]:
-            self.hover()
-            return State.STRAFE_LEFT
-        return State.FORWARD_TO_TARGET
-
-    def handle_STRAFE_LEFT(self, ctx: Context) -> State:
-        frame = ctx.frame_read.frame
-        cv2.putText(frame,
-                    f"STATE: STRAFE_LEFT (rc left ~{ctx.params['STRAFE_LEFT_CM']}cm)",
-                    (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
-
-        # 速度與時間
-        v = int(max(10, 5))
-        t_needed = float(3)
-
-        # 第一次進來 → 設起始時間、清 PID、開始左移
-        if self.strafe_t0 is None:
+        rvec, tvec = ctx.last_poses[target_id]
+        z = tvec[2][0]
+        fb = ctx.pid_fb.update(z - 20.0, sleep=0.0)     # move to 20cm in front of marker
+        self.send_rc(0, fb, 0, 0)
+        #check if close enough
+        if z < 45.0:
             self.reset_pids()
-            self.hover()  # 先確保停住
+            return State.STRAFE_OPPOSITE
+        return State.FORWARD_TO_TARGET
+    
+    def handle_STRAFE_OPPOSITE(self, ctx):
+        frame = ctx.frame_read.frame
+        cv2.putText(frame, "STRAFE_OPPOSITE", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,255), 2)
+
+        if self.strafe_t0 is None:
             self.strafe_t0 = time.time()
 
-        # 連續左移：每個循環都送一次 rc（模擬模式會只列印，不會真送）
-        self.send_rc(-v, 0, 0, 0)
-
-        # 判斷是否已達時間
-        if time.time() - self.strafe_t0 >= t_needed:
-            # 停止、清計時器並收尾
-            self.send_rc(0, 0, 0, 0)
+        direction_sign = ctx.params["OPPOSITE_STRAFE_SIGN"]
+        self.send_rc(-direction_sign * 35, 0, 0, 0)
+        if time.time() - self.strafe_t0 > 2.2:
             self.strafe_t0 = None
-            return State.FOLLOW_MARKER_ID
-
-        # 尚未到時間，維持 STRAFE_LEFT
-        return State.STRAFE_LEFT
+            return State.CREEP_FORWARD
+        return State.STRAFE_OPPOSITE
     
+    def handle_CREEP_FORWARD(self, ctx):
+        frame = ctx.frame_read.frame
+        cv2.putText(frame, "CREEP_FORWARD", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,255), 2)
+
+        self.send_rc(0, ctx.params["CREEP_FB"], 0, 0)
+
+        if ctx.last_ids is not None and ctx.params["FOLLOW_ID"] in ctx.last_poses:
+            return State.FOLLOW_MARKER_ID
+        
+        return State.CREEP_FORWARD
+
     def handle_FOLLOW_MARKER_ID(self, ctx: Context) -> State:
         """
-        跟隨指定 ID，並在看見 marker 時同時做中心對齊 (x,y)、距離對齊 (z)，
-        並以 yaw 校正讓機頭轉到與 marker 垂直。
+        跟隨指定 ID；若『看不到 FOLLOW_ID、但看到 MARKER_3』→ 立刻轉入 PASS_UNDER_TABLE_3。
+        其他時候依 lab6 風格：x/y/z 用 PID，角度用 calculate_marker_angle 校正旋轉。
         """
         tid = ctx.params["FOLLOW_ID"]
 
@@ -444,13 +476,24 @@ class DroneFSM:
             self._follow_stable = 0
 
         poses = getattr(ctx, "last_poses", {}) or {}
+
+        # === [CHANGED] 先抓 marker3 id（預設 3）
+        marker3 = int(ctx.params.get("MARKER_3", 3))  # === [CHANGED] ===
+
+        # === [CHANGED] 分支順序改為：若「看不到 FOLLOW_ID 且 看得到 MARKER_3」→ 直接切狀態
+        if tid not in poses and marker3 in poses:      # === [CHANGED] ===
+            self._follow_stable = 0                    # === [CHANGED] ===
+            self.hover()                               # === [CHANGED] ===
+            return State.PASS_UNDER_TABLE_3            # === [CHANGED] ===
+
         if tid not in poses:
-            # 看不到 marker：改為「緩慢前進」
+            # 看不到兩者：維持「緩慢前進」以便重新遇到目標
             self._follow_stable = 0
             fwd_speed = int(ctx.params.get("SEARCH_FORWARD_SPEED", 10))
             self.send_rc(0, fwd_speed, 0, 0)
             return State.FOLLOW_MARKER_ID
 
+        # 下面依 lab6 風格做 PID + 角度校正
         rvec, tvec = poses[tid]
         x = float(tvec[0][0])
         y = float(tvec[1][0])
@@ -460,31 +503,31 @@ class DroneFSM:
         err_y = y
         err_z = z - ctx.params["TARGET_Z"]
 
-        lr = int(self.pid_lr.update(err_x, sleep=0.0))
-        ud = int(self.pid_ud.update(err_y, sleep=0.0))
-        fb = int(self.pid_fb.update(err_z, sleep=0.0))
+        # 與 lab6 一致：x→lr, y→ud, z→fb
+        lr = int(ctx.pid_lr.update(err_x, sleep=0.0))
+        ud = int(ctx.pid_ud.update(err_y, sleep=0.0))
+        fb = int(ctx.pid_fb.update(err_z, sleep=0.0))
 
-        # === [CHANGED] 新增：由 rvec 推回偏航角誤差 → 轉成 yaw 速度 ===
-        yaw_err_deg = self._marker_yaw_error_deg_from_rvec(rvec)
-        yaw_kp = float(ctx.params.get("YAW_KP", 0.6))
-        yaw_cmd = int(yaw_kp * yaw_err_deg)
+        marker_angle, _ = calculate_marker_angle(rvec)        # === [CHANGED] ===
+        target_alignment_angle = 0.0                          # === [CHANGED] ===
+        angle_error = marker_angle - target_alignment_angle   # === [CHANGED] ===
+        angle_dead_zone = float(ctx.params.get("YAW_TOL_DEG", 5.0))  # === [CHANGED] ===
+        if abs(angle_error) < angle_dead_zone:                # === [CHANGED] ===
+            angle_error = 0                                   # === [CHANGED] ===
 
-        # 速度限幅
-        cap = int(ctx.params["MAX_RC"])
+        cap = int(ctx.params.get("MAX_RC", 25))
         lr  = max(-cap, min(cap, lr))
         ud  = max(-cap, min(cap, ud))
         fb  = max(-cap, min(cap, fb))
-        yaw_cmd = max(-cap, min(cap, yaw_cmd))  # === [CHANGED] ===
+        angle_error = max(-cap, min(cap, angle_error))        # === [CHANGED] ===
 
-        # 實際送 RC；注意相機 y 與 RC z 的號誌
-        self.send_rc(lr, fb, -ud, yaw_cmd)  # === [CHANGED] ===
+        self.send_rc(lr, fb, -ud, int(-angle_error))          # === [CHANGED] ===
 
-        # 穩定達標檢查（多加一個 yaw 公差門檻）
-        yaw_tol = float(ctx.params.get("YAW_TOL_DEG", 5.0))  # === [CHANGED] ===
+        # 保留原本「有跟上 FOLLOW_ID 時」的穩定判斷（對 x/y/z/角度）
         if (abs(err_x) <= ctx.params["CENTER_X_TOL"] and
             abs(err_y) <= ctx.params["CENTER_Y_TOL"] and
             abs(err_z) <= ctx.params["Z_TOL"] and
-            abs(yaw_err_deg) <= yaw_tol):  # === [CHANGED] ===
+            abs(angle_error) == 0):
             self._follow_stable += 1
         else:
             self._follow_stable = 0
@@ -495,6 +538,8 @@ class DroneFSM:
             return State.PASS_UNDER_TABLE_3
 
         return State.FOLLOW_MARKER_ID
+
+
 
 
     def handle_PASS_UNDER_TABLE_3(self, ctx: Context) -> State:
@@ -740,49 +785,8 @@ class DroneFSM:
 
 
     def handle_DONE(self, ctx: Context) -> State:  # move forward and land
-        frame = ctx.frame_read.frame
-        cv2.putText(frame, "STATE: DONE (forward then stop & land)", (10, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-
-        # 使用與 STRAFE_LEFT 相同的速度/時間 → 距離近似相同
-        v = int(max(10, min(ctx.params["MAX_RC"], ctx.params.get("STRAFE_LEFT_RC", 30))))
-        t_needed = float(max(0.2, ctx.params.get("STRAFE_LEFT_TIME", 2.0)))
-
-        # 初次進入
-        if self.done_phase == 0:
-            self.reset_pids()
-            self.hover()
-            self.done_t0 = time.time()
-            self.done_phase = 1
-
-        # 階段 1：向前持續 t_needed 秒（每迴圈送 RC）
-        if self.done_phase == 1:
-            self.send_rc(0, v, 0, 0)  # fb = +v → 往前
-            if time.time() - self.done_t0 >= t_needed:
-                # 到時間 → 停下，準備降落
-                self.send_rc(0, 0, 0, 0)
-                self.done_t0 = time.time()
-                self.done_phase = 2
-            return State.DONE
-
-        # 階段 2：執行降落（模擬就只列印，真飛才 land 一次）
-        if self.done_phase == 2:
-            try:
-                if ctx.simulation or not ctx.airborne:
-                    self._record_cmd("[SIM MOVE] land")
-                else:
-                    ctx.drone.land()
-                    ctx.airborne = False
-            except Exception as e:
-                print(f"[WARN] land failed: {e}")
-            finally:
-                self.done_phase = 3
-            return State.DONE
-
-        # 階段 3：已完成（維持停止/懸停狀態）
-        self.hover()
         return State.DONE
-
+    
 
 
 def main():
