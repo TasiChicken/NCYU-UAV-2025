@@ -550,37 +550,243 @@ class DroneFSM:
 
     def handle_PASS_UNDER_TABLE_3(self, ctx: Context) -> State:
         """
-        TODO:
-        - 若偵測到 ctx.params["MARKER_3"]，以 ud<0 下降；可設定安全 z 與最長時間保護。
-        - 穿越完成（例如 z 小於門檻、或計時到）→ ROTATE_RIGHT_90。
+        Pass under table:
+        1. Search for MARKER_3
+        2. Once detected, descend 50cm
+        3. Move forward 2m
+        4. Transition to ROTATE_RIGHT_90
         """
+        frame = ctx.frame_read.frame
+        tid = ctx.params["MARKER_3"]
+        
+        # Initialize phase tracking
+        if not hasattr(self, "_pass_phase"):
+            self._pass_phase = 0  # 0=searching, 1=descending, 2=moving_forward, 3=complete
+            self._pass_t0 = None
+            self._pass_initial_height = None
+        
+        cv2.putText(frame, f"STATE: PASS_UNDER_TABLE_3 (Phase {self._pass_phase})", 
+                    (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+        
+        # Phase 0: Search for MARKER_3
+        if self._pass_phase == 0:
+            poses = getattr(ctx, "last_poses", {}) or {}
+            if tid not in poses:
+                # Keep searching - gentle forward movement
+                self.send_rc(0, 5, 0, 0)  # Slow forward
+                cv2.putText(frame, f"Searching for Marker {tid}...", 
+                           (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 2)
+                return State.PASS_UNDER_TABLE_3
+            
+            # Marker detected! Move to descending phase
+            print(f"[PASS_TABLE] Marker {tid} detected, starting descent")
+            self.hover()
+            time.sleep(0.3)  # Brief pause
+            self._pass_t0 = time.time()
+            self._pass_phase = 1
+            return State.PASS_UNDER_TABLE_3
+        
+        # Phase 1: Descend 50cm (using time-based control)
+        # Assuming descent speed of ~20 cm/s, 50cm takes ~2.5 seconds
+        if self._pass_phase == 1:
+            DESCENT_TIME = 2.5  # seconds for 50cm descent
+            elapsed = time.time() - self._pass_t0
+            
+            if elapsed < DESCENT_TIME:
+                # Continue descending (ud>0 = down)
+                self.send_rc(0, 0, 20, 0)  # Gentle descent
+                cv2.putText(frame, f"Descending... {elapsed:.1f}s / {DESCENT_TIME}s", 
+                           (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
+                return State.PASS_UNDER_TABLE_3
+            
+            # Descent complete, move to forward phase
+            print("[PASS_TABLE] Descent complete, moving forward 2m")
+            self.hover()
+            time.sleep(0.3)  # Brief pause
+            self._pass_t0 = time.time()
+            self._pass_phase = 2
+            return State.PASS_UNDER_TABLE_3
+        
+        # Phase 2: Move forward 2m (200cm)
+        # Assuming forward speed of ~40 cm/s, 200cm takes ~5 seconds
+        if self._pass_phase == 2:
+            FORWARD_TIME = 5.0  # seconds for 2m forward
+            elapsed = time.time() - self._pass_t0
+            
+            if elapsed < FORWARD_TIME:
+                # Continue moving forward
+                self.send_rc(0, 40, 0, 0)  # Moderate forward speed
+                cv2.putText(frame, f"Moving forward... {elapsed:.1f}s / {FORWARD_TIME}s", 
+                           (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
+                return State.PASS_UNDER_TABLE_3
+            
+            # Forward movement complete
+            print("[PASS_TABLE] Passage complete, transitioning to ROTATE_RIGHT_90")
+            self.hover()
+            self._pass_phase = 0  # Reset for next time
+            return State.ROTATE_RIGHT_90
+        
+        # Fallback
         return State.PASS_UNDER_TABLE_3
 
     def handle_ROTATE_RIGHT_90(self, ctx: Context) -> State:
         """
-        TODO:
-        - 以 yaw>0 送速度搭配時間估 90°，或直接呼叫 SDK rotate_clockwise(ctx.params["ROTATE_DEG"])。
-        - 完成後 → ASCEND_LOCK_4。
+        Rotate right 90 degrees:
+        1. Use yaw control to rotate clockwise
+        2. Time-based rotation (assuming ~90 deg/s rotation rate)
+        3. Transition to ASCEND_LOCK_4
         """
+        frame = ctx.frame_read.frame
+        
+        # Initialize rotation tracking
+        if not hasattr(self, "_rotate_phase"):
+            self._rotate_phase = 0  # 0=init, 1=rotating, 2=complete
+            self._rotate_t0 = None
+        
+        cv2.putText(frame, f"STATE: ROTATE_RIGHT_90 (Phase {self._rotate_phase})", 
+                    (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+        
+        # Phase 0: Initialize
+        if self._rotate_phase == 0:
+            print("[ROTATE_RIGHT] Starting 90° clockwise rotation")
+            self.hover()
+            time.sleep(0.3)  # Brief pause before rotation
+            self._rotate_t0 = time.time()
+            self._rotate_phase = 1
+            return State.ROTATE_RIGHT_90
+        
+        # Phase 1: Rotate 90 degrees
+        # Using rotation speed of 30 deg/s, 90° takes ~3 seconds
+        if self._rotate_phase == 1:
+            ROTATE_DEG = ctx.params.get("ROTATE_DEG", 90)
+            ROTATE_SPEED = 30  # Degrees per second
+            ROTATE_TIME = ROTATE_DEG / ROTATE_SPEED  # ~3 seconds for 90°
+            
+            elapsed = time.time() - self._rotate_t0
+            
+            if elapsed < ROTATE_TIME:
+                # Continue rotating clockwise (positive yaw)
+                self.send_rc(0, 0, 0, 30)  # yaw>0 = clockwise
+                cv2.putText(frame, f"Rotating CW... {elapsed:.1f}s / {ROTATE_TIME:.1f}s", 
+                           (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
+                return State.ROTATE_RIGHT_90
+            
+            # Rotation complete
+            print("[ROTATE_RIGHT] 90° rotation complete, moving to ASCEND_LOCK_4")
+            self.hover()
+            self._rotate_phase = 0  # Reset for next time
+            return State.ASCEND_LOCK_4
+        
+        # Fallback
         return State.ROTATE_RIGHT_90
 
     def handle_ASCEND_LOCK_4(self, ctx: Context) -> State:
         """
-        TODO:
-        - 持續微升（ud>0），搜尋並對齊 ctx.params["MARKER_4"]。
-        - 置中判準：|x|,|y| < tol 且連續 ctx.params["TRACK_STABLE_N"] 幀。
-        - 達成後 → OVERBOARD_TO_FIND_5。
+        Ascend while searching for MARKER_4, then lock onto it:
+        1. Continuously ascend (ud<0 = up in your convention)
+        2. When MARKER_4 detected, use PID to center on it
+        3. Maintain centered position for TRACK_STABLE_N frames
+        4. Transition to OVERBOARD_TO_FIND_5
         """
+        frame = ctx.frame_read.frame
+        tid = ctx.params["MARKER_4"]
+        
+        # Initialize tracking
+        if not hasattr(self, "_ascend_stable"):
+            self._ascend_stable = 0
+        
+        cv2.putText(frame, f"STATE: ASCEND_LOCK_4 (find & lock ID={tid})", 
+                    (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+        
+        poses = getattr(ctx, "last_poses", {}) or {}
+        
+        if tid not in poses:
+            # Marker not detected - continue ascending while searching
+            self._ascend_stable = 0
+            ASCEND_SPEED = 15  # Gentle ascent
+            self.send_rc(0, 0, -ASCEND_SPEED, 0)  # ud<0 = up
+            cv2.putText(frame, f"Ascending, searching for Marker {tid}...", 
+                       (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 2)
+            return State.ASCEND_LOCK_4
+        
+        # Marker detected - perform centering with PID
+        rvec, tvec = poses[tid]
+        x = float(tvec[0][0])
+        y = float(tvec[1][0])
+        z = float(tvec[2][0])
+        
+        # Display marker position
+        cv2.putText(frame, f"Marker4: x={x:.1f} y={y:.1f} z={z:.1f}cm", 
+                   (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+        
+        # PID control for centering
+        err_x = x
+        err_y = y
+        
+        lr = int(ctx.pid_lr.update(err_x, sleep=0.0))
+        ud = int(ctx.pid_ud.update(err_y, sleep=0.0))
+        
+        # Speed limiting
+        cap = int(ctx.params["MAX_RC"])
+        lr = max(-cap, min(cap, lr))
+        ud = max(-cap, min(cap, ud))
+        
+        # Send control command (note: ud sign is flipped for camera-to-drone coordinate)
+        self.send_rc(lr, 0, -ud, 0)
+        
+        # Check if centered within tolerance
+        if (abs(err_x) <= ctx.params["CENTER_X_TOL"] and 
+            abs(err_y) <= ctx.params["CENTER_Y_TOL"]):
+            self._ascend_stable += 1
+            cv2.putText(frame, f"Locked! Stable: {self._ascend_stable}/{ctx.params['TRACK_STABLE_N']}", 
+                       (10, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+        else:
+            self._ascend_stable = 0
+            cv2.putText(frame, "Centering on marker...", 
+                       (10, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 2)
+        
+        # Check if stable for required number of frames
+        if self._ascend_stable >= ctx.params["TRACK_STABLE_N"]:
+            print(f"[ASCEND_LOCK_4] Locked on Marker {tid}, moving to OVERBOARD_TO_FIND_5")
+            self.hover()
+            self._ascend_stable = 0  # Reset for next time
+            return State.OVERBOARD_TO_FIND_5
+        
         return State.ASCEND_LOCK_4
 
     def handle_OVERBOARD_TO_FIND_5(self, ctx: Context) -> State:
         """
-        TODO:
-        - 維持微升（ud = params["OVERBOARD_UD"]）與向左水平（lr = params["OVERBOARD_LR"]）。
-        - 一旦偵測到 ctx.params["MARKER_5"]：
-            * 立即 hover，並（若需要）設旗標供 DONE 使用；
-            * 轉移 → DONE。
+        Move left to find MARKER_5:
+        1. Continuously move left (lr<0)
+        2. When MARKER_5 detected, hover and transition to DONE
         """
+        frame = ctx.frame_read.frame
+        tid = ctx.params["MARKER_5"]
+        
+        cv2.putText(frame, f"STATE: OVERBOARD_TO_FIND_5 (searching ID={tid})", 
+                    (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+        
+        poses = getattr(ctx, "last_poses", {}) or {}
+        
+        # Check if MARKER_5 is detected
+        if tid in poses:
+            # Marker 5 found! Hover and transition to DONE
+            print(f"[OVERBOARD] Marker {tid} detected! Transitioning to DONE")
+            self.hover()
+            time.sleep(0.3)  # Brief pause for stability
+            return State.DONE
+        
+        # Marker not detected - continue moving left only
+        lr_speed = ctx.params.get("OVERBOARD_LR", -15)  # Negative = left
+        
+        # Move left without ascending
+        self.send_rc(lr_speed, 0, 0, 0)  # Left only
+        
+        cv2.putText(frame, f"Moving left, searching for Marker {tid}...", 
+                   (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 2)
+        cv2.putText(frame, f"lr={lr_speed}", 
+                   (10, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+        
         return State.OVERBOARD_TO_FIND_5
 
     # === [CHANGED] 新增：對齊到距離 marker 5 的 Y，翻滾後降落 ===
