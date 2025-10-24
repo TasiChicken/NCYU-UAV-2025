@@ -178,6 +178,10 @@ class Context:
         # following
         "FOLLOW_ID": 1,             # 要跟隨的 marker
         "FOLLOW_DIS": 60.0,
+        "FOLLOW_ROT_SPE": 40.0,
+        "FOLLOW_X_SPE": 20.0,
+        "FOLLOW_Y_SPE": 20.0,
+        "FOLLOW_Z_SPE": 25.0,
 
         "MARKER_3": 3,              # 穿桌用的 marker
         "MARKER_4": 4,              # 牆上定位用的 marker
@@ -522,25 +526,28 @@ class DroneFSM:
     
         
         # Step 3: Apply speed limiting to prevent loss of control (建議限制最高速度防止失控)
-        max_speed_threshold = 25
-        
+        rot_speed = ctx.params["FOLLOW_ROT_SPE"]
+        x_speed = ctx.params["FOLLOW_X_SPE"]
+        y_speed = ctx.params["FOLLOW_Y_SPE"]
+        z_speed = ctx.params["FOLLOW_Z_SPE"]
+                
         # Limit yaw (left/right) speed
-        if yaw_update > max_speed_threshold:
-            yaw_update = max_speed_threshold
-        elif yaw_update < -max_speed_threshold:
-            yaw_update = -max_speed_threshold
+        if yaw_update > x_speed:
+            yaw_update = x_speed
+        elif yaw_update < -x_speed:
+            yaw_update = -x_speed
         
         # Limit up/down speed  
-        if ud_update > max_speed_threshold:
-            ud_update = max_speed_threshold
-        elif ud_update < -max_speed_threshold:
-            ud_update = -max_speed_threshold
+        if ud_update > y_speed:
+            ud_update = y_speed
+        elif ud_update < -y_speed:
+            ud_update = -y_speed
         
         # Limit forward/back speed
-        if fb_update > max_speed_threshold:
-            fb_update = max_speed_threshold
-        elif fb_update < -max_speed_threshold:
-            fb_update = -max_speed_threshold
+        if fb_update > z_speed:
+            fb_update = z_speed
+        elif fb_update < -z_speed:
+            fb_update = -z_speed
         
         # Add rotation control based on marker orientation with proper angle normalization
         # Target alignment angle - we want the marker to appear level in the image
@@ -551,15 +558,15 @@ class DroneFSM:
         angle_error = marker_angle - target_alignment_angle
         
         # Dead zone - don't rotate if error is small (prevents jittering)
-        angle_dead_zone = 5.0  # degrees - larger dead zone for stability
+        angle_dead_zone = 3.0  # degrees - larger dead zone for stability
         if abs(angle_error) < angle_dead_zone:
             angle_error = 0
         
         # Apply speed limiting for rotation
-        if angle_error > max_speed_threshold:
-            angle_error = max_speed_threshold
-        elif angle_error < -max_speed_threshold:
-            angle_error = -max_speed_threshold
+        if angle_error > rot_speed:
+            angle_error = rot_speed
+        elif angle_error < -rot_speed:
+            angle_error = -rot_speed
         
         self.send_rc(int(yaw_update), int(fb_update), int(-ud_update), int(-angle_error))
         return State.FOLLOW_MARKER_ID
