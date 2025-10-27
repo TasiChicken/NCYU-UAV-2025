@@ -179,7 +179,7 @@ class Context:
 
         # following
         "FOLLOW_ID": 0,             # 要跟隨的 marker
-        "FOLLOW_DIS": 30.0,
+        "FOLLOW_DIS": 50.0,
         "FOLLOW_ROT_SPE": 60.0,
         "FOLLOW_X_SPE": 25.0,
         "FOLLOW_Y_SPE": 25.0,
@@ -205,7 +205,7 @@ class Context:
 
 class DroneFSM:
     def __init__(self, ctx: Context):
-        self.state = State.ASCEND_SEARCH
+        self.state = State.FOLLOW_MARKER_ID
         self.ctx = ctx
         self.strafe_t0 = None
         self.handlers = {
