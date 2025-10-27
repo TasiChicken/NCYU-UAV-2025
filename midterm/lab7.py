@@ -636,6 +636,7 @@ class DroneFSM:
             x = float(tvec[0][0])
             y = float(tvec[1][0])
             z = float(tvec[2][0])
+            z = z - 70
             # angle alignment
             marker_angle, _ = calculate_marker_angle(rvec)
             # normalize to [-180, 180]
