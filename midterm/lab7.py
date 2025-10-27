@@ -664,10 +664,13 @@ class DroneFSM:
                 self._pass_stable += 1
                 cv2.putText(frame, f"Centered+Aligned stable {self._pass_stable}/{ctx.params['TRACK_STABLE_N']}",
                            (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+                
             else:
                 self._pass_stable = 0
                 cv2.putText(frame, "Centering & aligning marker 3...",
                            (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 2)
+                cv2.putText(frame, f"x={x:.1f} (tol {tol_x}), y={y:.1f} (tol {tol_y}), angle={angle_err:.1f} (tol {tol_a})",
+                           (10, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 165, 0), 2)
 
             if self._pass_stable >= int(ctx.params.get("TRACK_STABLE_N", 5)):
                 print("[PASS_TABLE] Centered & aligned. Start descent")
