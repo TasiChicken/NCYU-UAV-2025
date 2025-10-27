@@ -181,9 +181,9 @@ class Context:
         "FOLLOW_ID": 0,             # 要跟隨的 marker
         "FOLLOW_DIS": 40.0,
         "FOLLOW_ROT_SPE": 60.0,
-        "FOLLOW_X_SPE": 30.0,
+        "FOLLOW_X_SPE": 20.0,
         "FOLLOW_Y_SPE": 50.0,
-        "FOLLOW_Z_SPE": 30.0,
+        "FOLLOW_Z_SPE": 20.0,
 
         "MARKER_3": 3,              # 穿桌用的 marker
         "MARKER_4": 4,              # 牆上定位用的 marker
@@ -520,14 +520,18 @@ class DroneFSM:
         # Calculate errors for PID tuning analysis
         error_x = x  # Left/Right error
         error_y = y  # Up/Down error
-        error_z = z - target_dist  # Forward/Back error (target 80cm)
+        error_z = z - target_dist  # Forward/Back error
         # print(error_z)
         
         
         # Step 2: Use PID to get control outputs
         yaw_update = ctx.pid_lr.update(error_x, sleep=0.0) * 1.1    # Left/Right movement
         ud_update = ctx.pid_ud.update(error_y, sleep=0.0) * 1.1       # Up/Down movement
-        fb_update = ctx.pid_fb.update(error_z, sleep=0.0) * 1.1        # Forward/Back movement
+        fb_update = ctx.pid_fb.update(error_z, sleep=0.0)        # Forward/Back movement
+
+
+        if fb_update < 0:
+            fb_update = fb_update * 1.5
     
         
         # Step 3: Apply speed limiting to prevent loss of control (建議限制最高速度防止失控)
@@ -563,8 +567,7 @@ class DroneFSM:
         angle_error = (marker_angle - target_alignment_angle) * 1.5
 
                 
-        cv2.putText(ctx.frame_read.frame, f"error x:{error_x}, error y:{error_y}, error z:{error_z}, error a:{angle_error}", 
-                           (10, 200), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 165, 255), 2)
+        print(f"error x:{error_x}, error y:{error_y}, error z:{error_z}, error a:{angle_error}")
         
         # Dead zone - don't rotate if error is small (prevents jittering)
         angle_dead_zone = 1.0  # degrees - larger dead zone for stability
