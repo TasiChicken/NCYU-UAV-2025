@@ -557,21 +557,21 @@ class DroneFSM:
         target_alignment_angle = 0.0
         
         # Calculate shortest angle error  
-        angle_error = marker_angle - target_alignment_angle
+        angle_error = (marker_angle - target_alignment_angle) * 1.5
 
                 
         cv2.putText(ctx.frame_read.frame, f"error x:{error_x}, error y:{error_y}, error z:{error_z}, error a:{angle_error}", 
                            (10, 200), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 165, 255), 2)
         
         # Dead zone - don't rotate if error is small (prevents jittering)
-        angle_dead_zone = 3.0  # degrees - larger dead zone for stability
+        angle_dead_zone = 1.0  # degrees - larger dead zone for stability
         if abs(angle_error) < angle_dead_zone:
             angle_error = 0
         
         # Apply speed limiting for rotation
-        if angle_error > 0:#rot_speed:
+        if angle_error > rot_speed:
             angle_error = rot_speed
-        elif angle_error < 0:#-rot_speed:
+        elif angle_error < -rot_speed:
             angle_error = -rot_speed
         
         self.send_rc(int(yaw_update), int(fb_update), int(-ud_update), int(-angle_error))
