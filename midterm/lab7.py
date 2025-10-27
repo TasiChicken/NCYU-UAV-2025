@@ -168,12 +168,9 @@ class Context:
         "SEARCH_RIGHT_SPEED": 30,
         "CENTER_X_TOL": 15.0,
         "CENTER_Y_TOL": 20.0,
-        "TARGET_Z": 90.0,
-        "Z_TOL": 7.0,
-        "STRAFE_LEFT_CM": 70,
-        "STRAFE_RC":30,          # 側移 RC 速度
-        "STRAFE_TIME_1M": 2.2,    # 估 2.2 秒 ≈ 1m（需實機校正）
-        "STRAFE_TIME_SCAN": 1.0,   # 側移掃描時間
+        "TARGET_Z": 120.0,
+        "Z_TOL": 10.0,
+        "STRAFE_RC":25,          # 側移 RC 速度
         "CREEP_FB": 15,           # 慢速前進 RC
         "MAX_RC": 40,
         "OPPOSITE_STRAFE_SIGN": 0, # 之後決定
@@ -182,11 +179,11 @@ class Context:
 
         # following
         "FOLLOW_ID": 0,             # 要跟隨的 marker
-        "FOLLOW_DIS": 60.0,
+        "FOLLOW_DIS": 40.0,
         "FOLLOW_ROT_SPE": 60.0,
-        "FOLLOW_X_SPE": 20.0,
-        "FOLLOW_Y_SPE": 20.0,
-        "FOLLOW_Z_SPE": 25.0,
+        "FOLLOW_X_SPE": 30.0,
+        "FOLLOW_Y_SPE": 50.0,
+        "FOLLOW_Z_SPE": 30.0,
 
         "MARKER_3": 3,              # 穿桌用的 marker
         "MARKER_4": 4,              # 牆上定位用的 marker
@@ -205,8 +202,8 @@ class Context:
 
 class DroneFSM:
     def __init__(self, ctx: Context):
+        self.state = State.PASS_UNDER_TABLE_3
         self.ctx = ctx
-        self.state = State.ASCEND_SEARCH
         self.strafe_t0 = None
         self.handlers = {
             State.ASCEND_SEARCH      : self.handle_ASCEND_SEARCH,
@@ -478,7 +475,7 @@ class DroneFSM:
             self.send_rc(direction_sign * 30, 0, 0, 0)
             if time.time() - self.strafe_t0 > 2.2:
                 self.strafe_t0 = None
-                return State.CREEP_FORWARD
+                return State.FOLLOW_MARKER_ID
             return State.STRAFE_OPPOSITE
         except KeyError:
             self.send_rc(0, 0, 0, 0)
@@ -525,9 +522,9 @@ class DroneFSM:
         
         
         # Step 2: Use PID to get control outputs
-        yaw_update = ctx.pid_lr.update(error_x, sleep=0.0)     # Left/Right movement
-        ud_update = ctx.pid_ud.update(error_y, sleep=0.0)        # Up/Down movement
-        fb_update = ctx.pid_fb.update(error_z, sleep=0.0)         # Forward/Back movement
+        yaw_update = ctx.pid_lr.update(error_x, sleep=0.0) * 1.1    # Left/Right movement
+        ud_update = ctx.pid_ud.update(error_y, sleep=0.0) * 1.1       # Up/Down movement
+        fb_update = ctx.pid_fb.update(error_z, sleep=0.0) * 1.1        # Forward/Back movement
     
         
         # Step 3: Apply speed limiting to prevent loss of control (建議限制最高速度防止失控)
@@ -561,6 +558,10 @@ class DroneFSM:
         
         # Calculate shortest angle error  
         angle_error = marker_angle - target_alignment_angle
+
+                
+        cv2.putText(ctx.frame_read.frame, f"error x:{error_x}, error y:{error_y}, error z:{error_z}, error a:{angle_error}", 
+                           (10, 200), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 165, 255), 2)
         
         # Dead zone - don't rotate if error is small (prevents jittering)
         angle_dead_zone = 3.0  # degrees - larger dead zone for stability
@@ -568,9 +569,9 @@ class DroneFSM:
             angle_error = 0
         
         # Apply speed limiting for rotation
-        if angle_error > rot_speed:
+        if angle_error > 0:#rot_speed:
             angle_error = rot_speed
-        elif angle_error < -rot_speed:
+        elif angle_error < 0:#-rot_speed:
             angle_error = -rot_speed
         
         self.send_rc(int(yaw_update), int(fb_update), int(-ud_update), int(-angle_error))
