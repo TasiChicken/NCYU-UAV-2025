@@ -178,10 +178,10 @@ class Context:
 
 
         # following
-        "FOLLOW_ID": 5,             # 要跟隨的 marker
-        "FOLLOW_DIS": 40.0,
+        "FOLLOW_ID": 0,             # 要跟隨的 marker
+        "FOLLOW_DIS": 30.0,
         "FOLLOW_ROT_SPE": 60.0,
-        "FOLLOW_X_SPE": 20.0,
+        "FOLLOW_X_SPE": 25.0,
         "FOLLOW_Y_SPE": 25.0,
         "FOLLOW_Z_SPE": 30.0,
 
@@ -205,7 +205,7 @@ class Context:
 
 class DroneFSM:
     def __init__(self, ctx: Context):
-        self.state = State.PASS_UNDER_TABLE_3
+        self.state = State.ASCEND_SEARCH
         self.ctx = ctx
         self.strafe_t0 = None
         self.handlers = {
@@ -526,20 +526,14 @@ class DroneFSM:
         
         
         # Step 2: Use PID to get control outputs
-        #yaw_update = ctx.pid_lr.update(error_x, sleep=0.0)     # Left/Right movement
-        #ud_update = ctx.pid_ud.update(error_y, sleep=0.0) * 1.5       # Up/Down movement
-        #fb_update = ctx.pid_fb.update(error_z, sleep=0.0)        # Forward/Back movement
+        yaw_update = ctx.pid_lr.update(error_x, sleep=0.0)     # Left/Right movement
+        ud_update = ctx.pid_ud.update(error_y, sleep=0.0)       # Up/Down movement
+        fb_update = ctx.pid_fb.update(error_z, sleep=0.0)        # Forward/Back movement
 
 
-        # if fb_update < 0:
-        #     fb_update = fb_update * 1.5
+        if fb_update < 0:
+           fb_update = fb_update * 1.5
         
-    
-
-        yaw_update = error_x / 8
-        ud_update = error_y / 8 
-        fb_update = error_z / 8
-    
         
         # Step 3: Apply speed limiting to prevent loss of control (建議限制最高速度防止失控)
         rot_speed = ctx.params["FOLLOW_ROT_SPE"]
@@ -671,9 +665,10 @@ class DroneFSM:
 
             # check tolerances (x/y and angle)
             tol_x = 5
-            tol_y = 5
-            tol_a = 4
-            if abs(x) <= tol_x and abs(y) <= tol_y and abs(angle_err) <= tol_a:
+            tol_y = 10
+            tol_z = 5
+            tol_a = 0.8
+            if abs(x) <= tol_x and abs(y) <= tol_y and abs(z) <= tol_z and abs(angle_err) <= tol_a:
                 self._pass_stable += 1
                 cv2.putText(frame, f"Centered+Aligned stable {self._pass_stable}/{ctx.params['TRACK_STABLE_N']}",
                            (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
@@ -717,7 +712,7 @@ class DroneFSM:
         
         # Phase 3: Move forward 2m (200cm)
         if self._pass_phase == 3:
-            FORWARD_TIME = ctx.params.get("PASS_FORWARD_TIME", 5.0)
+            FORWARD_TIME = ctx.params.get("PASS_FORWARD_TIME", 4)
             forward_fb = ctx.params.get("PASS_FORWARD_FB", 40)
             elapsed = time.time() - self._pass_t0
             
@@ -812,7 +807,7 @@ class DroneFSM:
             # Marker not detected - continue ascending while searching
             self._ascend_stable = 0
             ascend_speed = ctx.params.get("ASCEND_LOCK_SPEED", 40)
-            self.send_rc(0, -5, ascend_speed, 0)  # ud<0 = up
+            self.send_rc(0, -20, ascend_speed, 0)  # ud<0 = up
             cv2.putText(frame, f"Ascending, searching for Marker {tid}...", 
                        (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 2)
             return State.ASCEND_LOCK_4
@@ -830,21 +825,23 @@ class DroneFSM:
         # PID control for centering
         err_x = x
         err_y = y
+        err_z = z - 50
         
         lr = int(ctx.pid_lr.update(err_x, sleep=0.0))
         ud = int(ctx.pid_ud.update(err_y, sleep=0.0))
-        
+        fb = int(ctx.pid_ud.update(err_z, sleep=0.0))
         # Speed limiting
         cap = int(ctx.params["MAX_RC"])
         lr = max(-cap, min(cap, lr))
         ud = max(-cap, min(cap, ud))
         
         # Send control command (note: ud sign is flipped for camera-to-drone coordinate)
-        self.send_rc(lr, 0, -ud, 0)
+        self.send_rc(lr, fb, -ud, 0)
         
         # Check if centered within tolerance
         if (abs(err_x) <= ctx.params["CENTER_X_TOL"] and 
-            abs(err_y) <= ctx.params["CENTER_Y_TOL"]):
+            abs(err_y) <= ctx.params["CENTER_Y_TOL"] and
+            abs(err_z) <= 10):
             self._ascend_stable += 1
             cv2.putText(frame, f"Locked! Stable: {self._ascend_stable}/{ctx.params['TRACK_STABLE_N']}", 
                        (10, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
