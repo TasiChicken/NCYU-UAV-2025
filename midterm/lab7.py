@@ -661,7 +661,7 @@ class DroneFSM:
             yaw_cmd = angle_err  # negative to reduce error
 
             # keep distance constant here (fb=0)
-            self.send_rc(lr*1.5, fb*1.5, -ud*1.5, yaw_cmd*1.5)
+            self.send_rc(lr*1.2, fb*1.2, -ud*1.2, -yaw_cmd*1.2)
 
             # check tolerances (x/y and angle)
             tol_x = 5
@@ -806,7 +806,7 @@ class DroneFSM:
             # Marker not detected - continue ascending while searching
             self._ascend_stable = 0
             ascend_speed = ctx.params.get("ASCEND_LOCK_SPEED", 40)
-            self.send_rc(0, 0, ascend_speed, 0)  # ud<0 = up
+            self.send_rc(0, -5, ascend_speed, 0)  # ud<0 = up
             cv2.putText(frame, f"Ascending, searching for Marker {tid}...", 
                        (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 2)
             return State.ASCEND_LOCK_4
@@ -896,7 +896,7 @@ class DroneFSM:
             elapsed = time.time() - self._over_t0
             if elapsed < ascend_time:
                 # Continue ascending (ud<0 = up)
-                self.send_rc(0, -5, ascend_ud, 0)
+                self.send_rc(0, 0, ascend_ud, 0)
                 cv2.putText(frame, f"Ascending ~80cm... {elapsed:.1f}s / {ascend_time:.1f}s", 
                            (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
                 return State.OVERBOARD_TO_FIND_5
