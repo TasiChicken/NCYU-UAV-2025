@@ -606,8 +606,8 @@ class DroneFSM:
             poses = getattr(ctx, "last_poses", {}) or {}
             if tid not in poses:
                 # Keep searching - gentle forward movement
-                search_fb = ctx.params.get("PASS_SEARCH_FB", 5)
-                self.send_rc(0, search_fb, 0, 0)
+                search_ud = ctx.params.get("PASS_SEARCH_UD", 5)
+                self.send_rc(0, 0, search_ud, 0)
                 cv2.putText(frame, f"Searching for Marker {tid}...", 
                            (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 2)
                 return State.PASS_UNDER_TABLE_3
@@ -635,23 +635,26 @@ class DroneFSM:
             rvec, tvec = poses[tid]
             x = float(tvec[0][0])
             y = float(tvec[1][0])
+            z = float(tvec[2][0])
             # angle alignment
             marker_angle, _ = calculate_marker_angle(rvec)
             # normalize to [-180, 180]
-            angle_err = ((marker_angle + 180.0) % 360.0) - 180.0
+            angle_err = marker_angle
 
             # PID for x/y
             lr = int(ctx.pid_lr.update(x, sleep=0.0))
             ud = int(ctx.pid_ud.update(y, sleep=0.0))
+            fb = int(ctx.pid_fb.update(z, sleep=0.0))
 
             # clamp
             cap = int(ctx.params.get("MAX_RC", 40))
+            fb = max(-cap, min(cap, fb))
             lr = max(-cap, min(cap, lr))
             ud = max(-cap, min(cap, ud))
-            yaw_cmd = int(max(-cap, min(cap, -angle_err)))  # negative to reduce error
+            yaw_cmd = angle_err  # negative to reduce error
 
             # keep distance constant here (fb=0)
-            self.send_rc(lr, 0, -ud, yaw_cmd)
+            self.send_rc(lr, fb, -ud, -yaw_cmd)
 
             # check tolerances (x/y and angle)
             tol_x = float(ctx.params.get("CENTER_X_TOL", 15.0))
