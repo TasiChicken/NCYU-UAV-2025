@@ -197,7 +197,8 @@ class Context:
         "TRACK_STABLE_N": 5,        # 連續幀數達標才視為穩定  
 
         "MARKER5_TARGET_Y": 0.0,   # 期望的相機座標系 y 距離（單位同 tvec，通常是 cm）
-        "Y_TOL": 5.0,              # y 距離容許誤差（cm）     
+        "Y_TOL": 2.0,              # y 距離容許誤差（cm）    
+        "ANGLE_TOL": 0.0,          # 角度容許誤差（deg）
 
 
     })
@@ -524,9 +525,9 @@ class DroneFSM:
         
         
         # Step 2: Use PID to get control outputs
-        yaw_update = ctx.pid_lr.update(error_x, sleep=0.0)      # Left/Right movement
+        yaw_update = ctx.pid_lr.update(error_x, sleep=0.0)     # Left/Right movement
         ud_update = ctx.pid_ud.update(error_y, sleep=0.0)        # Up/Down movement
-        fb_update = ctx.pid_fb.update(error_z, sleep=0.0)        # Forward/Back movement
+        fb_update = ctx.pid_fb.update(error_z, sleep=0.0)         # Forward/Back movement
     
         
         # Step 3: Apply speed limiting to prevent loss of control (建議限制最高速度防止失控)
@@ -580,18 +581,21 @@ class DroneFSM:
         """
         Pass under table:
         1. Search for MARKER_3
-        2. Once detected, descend 50cm
-        3. Move forward 2m
-        4. Transition to ROTATE_RIGHT_90
+        2. Center on MARKER_3 (x, y, and angle)
+        3. Descend 50cm
+        4. Move forward 2m
+        5. Transition to ROTATE_RIGHT_90
         """
         frame = ctx.frame_read.frame
         tid = ctx.params["MARKER_3"]
         
         # Initialize phase tracking
         if not hasattr(self, "_pass_phase"):
-            self._pass_phase = 0  # 0=searching, 1=descending, 2=moving_forward, 3=complete
+            # 0=searching, 1=center&align, 2=descending, 3=moving_forward
+            self._pass_phase = 0
             self._pass_t0 = None
             self._pass_initial_height = None
+            self._pass_stable = 0
         
         cv2.putText(frame, f"STATE: PASS_UNDER_TABLE_3 (Phase {self._pass_phase})", 
                     (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
@@ -607,16 +611,71 @@ class DroneFSM:
                            (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 2)
                 return State.PASS_UNDER_TABLE_3
             
-            # Marker detected! Move to descending phase
-            print(f"[PASS_TABLE] Marker {tid} detected, starting descent")
+            # Marker detected! Move to centering/alignment phase
+            print(f"[PASS_TABLE] Marker {tid} detected, start centering & aligning")
             self.hover()
             time.sleep(0.3)  # Brief pause
-            self._pass_t0 = time.time()
-            self._pass_phase = 1
+            self.reset_pids()
+            self._pass_stable = 0
+            self._pass_phase = 1  # go to centering phase
+            
             return State.PASS_UNDER_TABLE_3
-        
-        # Phase 1: Descend 50cm (using time-based control)
+
+        # Phase 1: Center on marker 3 (x, y, and yaw angle)
         if self._pass_phase == 1:
+            poses = getattr(ctx, "last_poses", {}) or {}
+            if tid not in poses:
+                # Lost marker during centering: hold position and keep trying
+                self.hover()
+                cv2.putText(frame, f"Lost Marker {tid} during centering...", 
+                           (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 165, 255), 2)
+                return State.PASS_UNDER_TABLE_3
+
+            rvec, tvec = poses[tid]
+            x = float(tvec[0][0])
+            y = float(tvec[1][0])
+            # angle alignment
+            marker_angle, _ = calculate_marker_angle(rvec)
+            # normalize to [-180, 180]
+            angle_err = ((marker_angle + 180.0) % 360.0) - 180.0
+
+            # PID for x/y
+            lr = int(ctx.pid_lr.update(x, sleep=0.0))
+            ud = int(ctx.pid_ud.update(y, sleep=0.0))
+
+            # clamp
+            cap = int(ctx.params.get("MAX_RC", 40))
+            lr = max(-cap, min(cap, lr))
+            ud = max(-cap, min(cap, ud))
+            yaw_cmd = int(max(-cap, min(cap, -angle_err)))  # negative to reduce error
+
+            # keep distance constant here (fb=0)
+            self.send_rc(lr, 0, -ud, yaw_cmd)
+
+            # check tolerances (x/y and angle)
+            tol_x = float(ctx.params.get("CENTER_X_TOL", 15.0))
+            tol_y = float(ctx.params.get("CENTER_Y_TOL", 15.0))
+            tol_a = float(ctx.params.get("ANGLE_TOL", 5.0))
+            if abs(x) <= tol_x and abs(y) <= tol_y and abs(angle_err) <= tol_a:
+                self._pass_stable += 1
+                cv2.putText(frame, f"Centered+Aligned stable {self._pass_stable}/{ctx.params['TRACK_STABLE_N']}",
+                           (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+            else:
+                self._pass_stable = 0
+                cv2.putText(frame, "Centering & aligning marker 3...",
+                           (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 2)
+
+            if self._pass_stable >= int(ctx.params.get("TRACK_STABLE_N", 5)):
+                print("[PASS_TABLE] Centered & aligned. Start descent")
+                self.hover()
+                time.sleep(0.2)
+                self.reset_pids()
+                self._pass_t0 = time.time()
+                self._pass_phase = 2
+            return State.PASS_UNDER_TABLE_3
+
+        # Phase 2: Descend 50cm (using time-based control)
+        if self._pass_phase == 2:
             DESCENT_TIME = ctx.params.get("PASS_DESCENT_TIME", 2.5)
             descent_ud = ctx.params.get("PASS_DESCENT_UD", 20)
             elapsed = time.time() - self._pass_t0
@@ -633,11 +692,11 @@ class DroneFSM:
             self.hover()
             time.sleep(0.3)  # Brief pause
             self._pass_t0 = time.time()
-            self._pass_phase = 2
+            self._pass_phase = 3
             return State.PASS_UNDER_TABLE_3
         
-        # Phase 2: Move forward 2m (200cm)
-        if self._pass_phase == 2:
+        # Phase 3: Move forward 2m (200cm)
+        if self._pass_phase == 3:
             FORWARD_TIME = ctx.params.get("PASS_FORWARD_TIME", 5.0)
             forward_fb = ctx.params.get("PASS_FORWARD_FB", 40)
             elapsed = time.time() - self._pass_t0
