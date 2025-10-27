@@ -948,10 +948,10 @@ class DroneFSM:
         self.send_rc(lr*1.5, fb*1.5, -ud*1.5, -angle_err*3)
 
         # check tolerances (x/y and angle)
-        tol_x = ctx.params.get("MARKER_3_X_TOL", 5)
-        tol_y = ctx.params.get("MARKER_3_Y_TOL", 5)
-        tol_z = ctx.params.get("MARKER_3_Z_TOL", 5)
-        tol_a = ctx.params.get("MARKER_3_ANGLE_TOL", 1)
+        tol_x = ctx.params.get("MARKER_5_X_TOL", 5)
+        tol_y = ctx.params.get("MARKER_5_Y_TOL", 5)
+        tol_z = ctx.params.get("MARKER_5_Z_TOL", 5)
+        tol_a = ctx.params.get("MARKER_5_ANGLE_TOL", 1)
 
         if abs(x) <= tol_x and abs(y) <= tol_y and abs(z) <= tol_z and abs(angle_err) <= tol_a:
             self.hover()
