@@ -705,7 +705,7 @@ class DroneFSM:
         
         # Phase 3: Move forward 2m (200cm)
         if self._pass_phase == 3:
-            FORWARD_TIME = ctx.params.get("PASS_FORWARD_TIME", 5.0)
+            FORWARD_TIME = ctx.params.get("PASS_FORWARD_TIME", 3.0)
             forward_fb = ctx.params.get("PASS_FORWARD_FB", 40)
             elapsed = time.time() - self._pass_t0
             
