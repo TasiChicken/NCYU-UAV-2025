@@ -825,7 +825,7 @@ class DroneFSM:
         # PID control for centering
         err_x = x
         err_y = y
-        err_z = z - 50
+        err_z = z - 100
         
         lr = int(ctx.pid_lr.update(err_x, sleep=0.0))
         ud = int(ctx.pid_ud.update(err_y, sleep=0.0))
@@ -841,7 +841,7 @@ class DroneFSM:
         # Check if centered within tolerance
         if (abs(err_x) <= ctx.params["CENTER_X_TOL"] and 
             abs(err_y) <= ctx.params["CENTER_Y_TOL"] and
-            abs(err_z) <= 10):
+            abs(err_z) <= 5):
             self._ascend_stable += 1
             cv2.putText(frame, f"Locked! Stable: {self._ascend_stable}/{ctx.params['TRACK_STABLE_N']}", 
                        (10, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
@@ -891,7 +891,7 @@ class DroneFSM:
                 return State.OVERBOARD_TO_FIND_5
 
             ascend_ud = int(ctx.params.get("OVERBOARD_ASCEND_UD", 40))
-            ascend_time = float(ctx.params.get("OVERBOARD_ASCEND_TIME", 2.0))
+            ascend_time = float(ctx.params.get("OVERBOARD_ASCEND_TIME", 1.0))
 
             if self._over_t0 is None:
                 self._over_t0 = time.time()
@@ -920,7 +920,7 @@ class DroneFSM:
                 return State.ALIGN_Y5_FLIP_LAND
 
             # Marker 5 not detected - continue moving left only
-            lr_speed = int(ctx.params.get("OVERBOARD_LR", -20))  # Negative = left
+            lr_speed = int(ctx.params.get("OVERBOARD_LR", -40))  # Negative = left
             self.send_rc(lr_speed, 0, 0, 0)
 
             cv2.putText(frame, f"Moving left, searching for Marker {tid5}...", 
