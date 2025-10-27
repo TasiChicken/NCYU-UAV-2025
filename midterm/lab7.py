@@ -205,7 +205,7 @@ class Context:
 
 class DroneFSM:
     def __init__(self, ctx: Context):
-        self.state = State.FOLLOW_MARKER_ID
+        self.state = State.PASS_UNDER_TABLE_3
         self.ctx = ctx
         self.strafe_t0 = None
         self.handlers = {
