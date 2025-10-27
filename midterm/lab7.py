@@ -661,7 +661,7 @@ class DroneFSM:
             yaw_cmd = angle_err  # negative to reduce error
 
             # keep distance constant here (fb=0)
-            self.send_rc(lr*1.2, fb*1.2, -ud*1.2, -yaw_cmd*1.2)
+            self.send_rc(lr*1.5, fb*1.2, -ud*1.2, -yaw_cmd*3)
 
             # check tolerances (x/y and angle)
             tol_x = 5
