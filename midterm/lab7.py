@@ -178,12 +178,12 @@ class Context:
 
 
         # following
-        "FOLLOW_ID": 0,             # 要跟隨的 marker
+        "FOLLOW_ID": 5,             # 要跟隨的 marker
         "FOLLOW_DIS": 40.0,
         "FOLLOW_ROT_SPE": 60.0,
         "FOLLOW_X_SPE": 20.0,
-        "FOLLOW_Y_SPE": 50.0,
-        "FOLLOW_Z_SPE": 20.0,
+        "FOLLOW_Y_SPE": 25.0,
+        "FOLLOW_Z_SPE": 30.0,
 
         "MARKER_3": 3,              # 穿桌用的 marker
         "MARKER_4": 4,              # 牆上定位用的 marker
@@ -205,7 +205,7 @@ class Context:
 
 class DroneFSM:
     def __init__(self, ctx: Context):
-        self.state = State.PASS_UNDER_TABLE_3
+        self.state = State.FOLLOW_MARKER_ID
         self.ctx = ctx
         self.strafe_t0 = None
         self.handlers = {
@@ -515,7 +515,8 @@ class DroneFSM:
         x, y, z = tvec[0][0], tvec[1][0], tvec[2][0]
         
         # Calculate marker rotation angle using rvec
-        marker_angle, z_prime = calculate_marker_angle(rvec)
+        angle_error, _ = calculate_marker_angle(rvec)
+        angle_error = angle_error * 4.0
         
         # Calculate errors for PID tuning analysis
         error_x = x  # Left/Right error
@@ -525,13 +526,19 @@ class DroneFSM:
         
         
         # Step 2: Use PID to get control outputs
-        yaw_update = ctx.pid_lr.update(error_x, sleep=0.0) * 1.1    # Left/Right movement
-        ud_update = ctx.pid_ud.update(error_y, sleep=0.0) * 1.1       # Up/Down movement
-        fb_update = ctx.pid_fb.update(error_z, sleep=0.0)        # Forward/Back movement
+        #yaw_update = ctx.pid_lr.update(error_x, sleep=0.0)     # Left/Right movement
+        #ud_update = ctx.pid_ud.update(error_y, sleep=0.0) * 1.5       # Up/Down movement
+        #fb_update = ctx.pid_fb.update(error_z, sleep=0.0)        # Forward/Back movement
 
 
-        if fb_update < 0:
-            fb_update = fb_update * 1.5
+        # if fb_update < 0:
+        #     fb_update = fb_update * 1.5
+        
+    
+
+        yaw_update = error_x / 8
+        ud_update = error_y / 8 
+        fb_update = error_z / 8
     
         
         # Step 3: Apply speed limiting to prevent loss of control (建議限制最高速度防止失控)
@@ -561,13 +568,12 @@ class DroneFSM:
         # Add rotation control based on marker orientation with proper angle normalization
         # Target alignment angle - we want the marker to appear level in the image
         # 0° = horizontal alignment (marker appears level)
-        target_alignment_angle = 0.0
-        
         # Calculate shortest angle error  
-        angle_error = (marker_angle - target_alignment_angle) * 1.5
 
                 
         print(f"error x:{error_x}, error y:{error_y}, error z:{error_z}, error a:{angle_error}")
+        print(f'fb err{yaw_update}')
+        print(f'fb err{fb_update}')
         
         # Dead zone - don't rotate if error is small (prevents jittering)
         angle_dead_zone = 1.0  # degrees - larger dead zone for stability
