@@ -197,7 +197,10 @@ class Context:
         "Y_TOL": 2.0,              # y 距離容許誤差（cm）    
         "ANGLE_TOL": 4.0,          # 角度容許誤差（deg）
 
-
+        "MARKER_5_DIS": 50,
+        "MARKER_5_X_TOL": 2.0,
+        "MARKER_5_Y_TOL": 2.0,
+        "MARKER_5_Z_TOL": 2.0
     })
 
 class DroneFSM:
@@ -911,7 +914,7 @@ class DroneFSM:
                 print(f"[OVERBOARD] Marker {tid5} detected! Transitioning to DONE")
                 self.hover()
                 time.sleep(0.3)  # Brief pause for stability
-                return State.DONE
+                return State.ALIGN_Y5_FLIP_LAND
 
             # Marker 5 not detected - continue moving left only
             lr_speed = int(ctx.params.get("OVERBOARD_LR", -20))  # Negative = left
@@ -925,70 +928,88 @@ class DroneFSM:
 
         return State.OVERBOARD_TO_FIND_5
 
-    # === [CHANGED] 新增：對齊到距離 marker 5 的 Y，翻滾後降落 ===
     def handle_ALIGN_Y5_FLIP_LAND(self, ctx: Context) -> State:
-        frame = ctx.frame_read.frame
-        cv2.putText(frame, "ALIGN_Y5_FLIP_LAND", (10, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,255), 2)
+        tid = ctx.params["MARKER_5"]
+        dis = ctx.params["MARKER_5_DIS"]
 
-        m5 = int(ctx.params.get("MARKER_5", 5))
-        poses = ctx.last_poses or {}
+        poses = getattr(ctx, "last_poses", {}) or {}
 
-        # 初始化穩定幀計數
-        if not hasattr(self, "_y5_stable"):
-            self._y5_stable = 0
-
-        # 沒看到 marker 5：保持懸停（或可依需求微調前進/上升）
-        if m5 not in poses:
-            self._y5_stable = 0
-            self.hover()
+        if tid not in poses:
+            self.send_rc(0, -10, 0, 0)  # slowly move back if lost        
             return State.ALIGN_Y5_FLIP_LAND
+        
+        rvec, tvec = poses[tid]
 
-        # 讀取 y 距離並與目標比較（OpenCV 相機座標：y 往下為正）
-        rvec, tvec = poses[m5]
-        y_cur = float(tvec[1][0])                       # 目前相機座標系下的 y（cm）
-        y_set = float(ctx.params["MARKER5_TARGET_Y"])   # 期望 y（cm）
-        err_y = y_cur - y_set                           # 正值→需要向上或向下：交給 PID 決定
-
-        # 只調整上下（ud），其餘維持 0；你也可加上 x/z 保持對齊，這裡依需求最小化
-        ud = int(ctx.pid_ud.update(err_y, sleep=0.0))
-        ud = self.clip(ud)
-        self.send_rc(0, 0, -ud, 0)   # 注意你的慣例：RC 要送 -ud
-
-        # 判斷是否到目標 y（用 Y_TOL，並可疊加 TRACK_STABLE_N 框定）
-        y_tol = float(ctx.params.get("Y_TOL", 5.0))
-        if abs(err_y) <= y_tol:
-            self._y5_stable += 1
-        else:
-            self._y5_stable = 0
-
-        if self._y5_stable >= int(ctx.params.get("TRACK_STABLE_N", 3)):
-            # 對齊完成：停止，翻滾一次，然後降落
+        x, y, z = tvec[0][0], tvec[1][0], tvec[2][0]
+        
+        # Calculate marker rotation angle using rvec
+        marker_angle, z_prime = calculate_marker_angle(rvec)
+        
+        # Calculate errors for PID tuning analysis
+        error_x = x  # Left/Right error
+        error_y = y  # Up/Down error
+        error_z = z - dis  # Forward/Back error (target 80cm)
+        # print(error_z)
+        
+        x_m = ["MARKER_5_X_TOL"]
+        y_m = ["MARKER_5_Y_TOL"]
+        z_m = ["MARKER_5_Z_TOL"]
+        if abs(error_z) < z_m and abs(error_x) < x_m and abs(error_y) < y_m:
             self.hover()
-            self._y5_stable = 0
-            self.reset_pids()
-
-            # 翻滾（模擬模式只記錄文字；真機則呼叫 flip）
-            if ctx.simulation or not ctx.airborne:
-                self._record_cmd("[SIM MOVE] flip forward")
-            else:
-                try:
-                    ctx.drone.flip('f')   # 'f','b','l','r' 依需求可改
-                except Exception as e:
-                    print("flip failed:", e)
-
-            # 降落
-            if ctx.simulation or not ctx.airborne:
-                self._record_cmd("[SIM MOVE] land")
-            else:
-                try:
-                    ctx.drone.land()
-                    ctx.airborne = False
-                except Exception as e:
-                    print("land failed:", e)
-
+            self.ctx.drone.land()
             return State.DONE
-
+        
+        
+        # Step 2: Use PID to get control outputs
+        yaw_update = ctx.pid_lr.update(error_x, sleep=0.0)    # Left/Right movement
+        ud_update = ctx.pid_ud.update(error_y, sleep=0.0)       # Up/Down movement
+        fb_update = ctx.pid_fb.update(error_z, sleep=0.0)        # Forward/Back movement
+    
+        
+        # Step 3: Apply speed limiting to prevent loss of control (建議限制最高速度防止失控)
+        rot_speed = ctx.params["FOLLOW_ROT_SPE"]
+        x_speed = ctx.params["FOLLOW_X_SPE"]
+        y_speed = ctx.params["FOLLOW_Y_SPE"]
+        z_speed = ctx.params["FOLLOW_Z_SPE"]
+                
+        # Limit yaw (left/right) speed
+        if yaw_update > x_speed:
+            yaw_update = x_speed
+        elif yaw_update < -x_speed:
+            yaw_update = -x_speed
+        
+        # Limit up/down speed  
+        if ud_update > y_speed:
+            ud_update = y_speed
+        elif ud_update < -y_speed:
+            ud_update = -y_speed
+        
+        # Limit forward/back speed
+        if fb_update > z_speed:
+            fb_update = z_speed
+        elif fb_update < -z_speed:
+            fb_update = -z_speed
+        
+        # Add rotation control based on marker orientation with proper angle normalization
+        # Target alignment angle - we want the marker to appear level in the image
+        # 0° = horizontal alignment (marker appears level)
+        target_alignment_angle = 0.0
+        
+        # Calculate shortest angle error  
+        angle_error = (marker_angle - target_alignment_angle) * 1.5
+        
+        # Dead zone - don't rotate if error is small (prevents jittering)
+        angle_dead_zone = 1.0  # degrees - larger dead zone for stability
+        if abs(angle_error) < angle_dead_zone:
+            angle_error = 0
+        
+        # Apply speed limiting for rotation
+        if angle_error > rot_speed:
+            angle_error = rot_speed
+        elif angle_error < -rot_speed:
+            angle_error = -rot_speed
+        
+        self.send_rc(int(yaw_update), int(fb_update), int(-ud_update), int(-angle_error))
         return State.ALIGN_Y5_FLIP_LAND
 
     def handle_DONE(self, ctx: Context) -> State:  # move forward and land
