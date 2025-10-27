@@ -186,6 +186,21 @@ class Context:
         "FOLLOW_Z_SPE": 30.0,
 
         "MARKER_3": 3,              # 穿桌用的 marker
+        "MARKER_3_X_TOL": 5.0,
+        "MARKER_3_Y_TOL": 5.0,
+        "MARKER_3_Z_TOL": 5.0,
+        "MARKER_3_ANGLE_TOL": 1.0,
+
+        "PASS_DESCENT_TIME": 2,
+        "PASS_DESCENT_UD": -40,
+
+        "PASS_FORWARD_TIME": 4,
+        "PASS_FORWARD_FB": 40,
+        
+        "MARKER_4_X_TOL": 5.0,
+        "MARKER_4_Y_TOL": 5.0,
+        "MARKER_4_Z_TOL": 5.0,
+
         "MARKER_4": 4,              # 牆上定位用的 marker
         "MARKER_5": 5,              # 終點判斷用的 marker
         "ROTATE_DEG": 90,           # 右轉角度
@@ -197,7 +212,7 @@ class Context:
         "Y_TOL": 2.0,              # y 距離容許誤差（cm）    
         "ANGLE_TOL": 4.0,          # 角度容許誤差（deg）
 
-        "MARKER_5_DIS": 50,
+        "MARKER_5_DIS": 150,
         "MARKER_5_X_TOL": 2.0,
         "MARKER_5_Y_TOL": 2.0,
         "MARKER_5_Z_TOL": 2.0
@@ -224,7 +239,7 @@ class DroneFSM:
             State.ASCEND_LOCK_4:          self.handle_ASCEND_LOCK_4,
             State.OVERBOARD_TO_FIND_5:    self.handle_OVERBOARD_TO_FIND_5,
 
-            State.ALIGN_Y5_FLIP_LAND:     self.handle_ALIGN_Y5_FLIP_LAND,
+            State.ALIGN_Y5_FLIP_LAND:     self.handle_ALIGN_LAND,
 
             State.DONE:            self.handle_DONE,
         }
@@ -585,14 +600,6 @@ class DroneFSM:
 
 
     def handle_PASS_UNDER_TABLE_3(self, ctx: Context) -> State:
-        """
-        Pass under table:
-        1. Search for MARKER_3
-        2. Center on MARKER_3 (x, y, and angle)
-        3. Descend 50cm
-        4. Move forward 2m
-        5. Transition to ROTATE_RIGHT_90
-        """
         frame = ctx.frame_read.frame
         tid = ctx.params["MARKER_3"]
         
@@ -601,25 +608,18 @@ class DroneFSM:
             # 0=searching, 1=center&align, 2=descending, 3=moving_forward
             self._pass_phase = 0
             self._pass_t0 = None
-            self._pass_initial_height = None
             self._pass_stable = 0
-        
-        cv2.putText(frame, f"STATE: PASS_UNDER_TABLE_3 (Phase {self._pass_phase})", 
-                    (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
         
         # Phase 0: Search for MARKER_3
         if self._pass_phase == 0:
             poses = getattr(ctx, "last_poses", {}) or {}
             if tid not in poses:
-                # Keep searching - gentle forward movement
                 search_ud = ctx.params.get("PASS_SEARCH_UD", 5)
                 self.send_rc(0, 0, search_ud, 0)
                 cv2.putText(frame, f"Searching for Marker {tid}...", 
                            (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 2)
                 return State.PASS_UNDER_TABLE_3
             
-            # Marker detected! Move to centering/alignment phase
-            print(f"[PASS_TABLE] Marker {tid} detected, start centering & aligning")
             self.hover()
             time.sleep(0.3)  # Brief pause
             self.reset_pids()
@@ -648,26 +648,20 @@ class DroneFSM:
             # normalize to [-180, 180]
             angle_err = marker_angle
 
-            # PID for x/y
+            # PID for x/y/z
             lr = int(ctx.pid_lr.update(x, sleep=0.0))
             ud = int(ctx.pid_ud.update(y, sleep=0.0))
             fb = int(ctx.pid_fb.update(z, sleep=0.0))
 
-            # clamp
-            cap = int(ctx.params.get("MAX_RC", 40))
-            fb = max(-cap, min(cap, fb))
-            lr = max(-cap, min(cap, lr))
-            ud = max(-cap, min(cap, ud))
-            yaw_cmd = angle_err  # negative to reduce error
-
             # keep distance constant here (fb=0)
-            self.send_rc(lr*1.5, fb*1.2, -ud*1.2, -yaw_cmd*3)
+            self.send_rc(lr*1.5, fb*1.5, -ud*1.5, -angle_err*3)
 
             # check tolerances (x/y and angle)
-            tol_x = 5
-            tol_y = 10
-            tol_z = 5
-            tol_a = 0.8
+            tol_x = ctx.params.get("MARKER_3_X_TOL", 5)
+            tol_y = ctx.params.get("MARKER_3_Y_TOL", 5)
+            tol_z = ctx.params.get("MARKER_3_Z_TOL", 5)
+            tol_a = ctx.params.get("MARKER_3_ANGLE_TOL", 1)
+
             if abs(x) <= tol_x and abs(y) <= tol_y and abs(z) <= tol_z and abs(angle_err) <= tol_a:
                 self._pass_stable += 1
                 cv2.putText(frame, f"Centered+Aligned stable {self._pass_stable}/{ctx.params['TRACK_STABLE_N']}",
@@ -677,7 +671,7 @@ class DroneFSM:
                 self._pass_stable = 0
                 cv2.putText(frame, "Centering & aligning marker 3...",
                            (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 2)
-                cv2.putText(frame, f"x={x:.1f} (tol {tol_x}), y={y:.1f} (tol {tol_y}), angle={angle_err:.1f} (tol {tol_a})",
+                cv2.putText(frame, f"x={x:.1f} (tol {tol_x}), y={y:.1f} (tol {tol_y}), z={z:.1f} (tol {tol_z}), angle={angle_err:.1f} (tol {tol_a})",
                            (10, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 165, 0), 2)
 
             if self._pass_stable >= int(ctx.params.get("TRACK_STABLE_N", 5)):
@@ -826,22 +820,24 @@ class DroneFSM:
         err_x = x
         err_y = y
         err_z = z - 100
-        
+        marker_angle, _ = calculate_marker_angle(rvec)
+        # normalize to [-180, 180]
+        angle_err = marker_angle
         lr = int(ctx.pid_lr.update(err_x, sleep=0.0))
         ud = int(ctx.pid_ud.update(err_y, sleep=0.0))
         fb = int(ctx.pid_ud.update(err_z, sleep=0.0))
-        # Speed limiting
-        cap = int(ctx.params["MAX_RC"])
-        lr = max(-cap, min(cap, lr))
-        ud = max(-cap, min(cap, ud))
         
         # Send control command (note: ud sign is flipped for camera-to-drone coordinate)
-        self.send_rc(lr, fb, -ud, 0)
+        self.send_rc(lr*1.5, fb*1.5, -ud*1.5, -angle_err*1.5)
         
         # Check if centered within tolerance
-        if (abs(err_x) <= ctx.params["CENTER_X_TOL"] and 
-            abs(err_y) <= ctx.params["CENTER_Y_TOL"] and
-            abs(err_z) <= 5):
+        # check tolerances (x/y and angle)
+        tol_x = ctx.params.get("MARKER_4_X_TOL", 5)
+        tol_y = ctx.params.get("MARKER_4_Y_TOL", 5)
+        tol_z = ctx.params.get("MARKER_4_Z_TOL", 5)
+        tol_a = ctx.params.get("MARKER_4_ANGLE_TOL", 1)
+
+        if abs(x) <= tol_x and abs(y) <= tol_y and abs(z) <= tol_z and abs(angle_err) <= tol_a:
             self._ascend_stable += 1
             cv2.putText(frame, f"Locked! Stable: {self._ascend_stable}/{ctx.params['TRACK_STABLE_N']}", 
                        (10, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
@@ -860,13 +856,6 @@ class DroneFSM:
         return State.ASCEND_LOCK_4
 
     def handle_OVERBOARD_TO_FIND_5(self, ctx: Context) -> State:
-        """
-        After confirming MARKER_4 is visible, ascend ~80cm, then move left to find MARKER_5:
-        1. Wait for MARKER_4 visibility
-        2. Ascend for OVERBOARD_ASCEND_TIME seconds (ud<0 = up)
-        3. Then continuously move left (lr<0)
-        4. When MARKER_5 detected, hover and transition to DONE
-        """
         frame = ctx.frame_read.frame
         tid5 = ctx.params["MARKER_5"]
         tid4 = ctx.params["MARKER_4"]
@@ -931,7 +920,7 @@ class DroneFSM:
 
         return State.OVERBOARD_TO_FIND_5
 
-    def handle_ALIGN_Y5_FLIP_LAND(self, ctx: Context) -> State:
+    def handle_ALIGN_LAND(self, ctx: Context) -> State:
         tid = ctx.params["MARKER_5"]
         dis = ctx.params["MARKER_5_DIS"]
 
@@ -944,78 +933,32 @@ class DroneFSM:
         rvec, tvec = poses[tid]
 
         x, y, z = tvec[0][0], tvec[1][0], tvec[2][0]
-        
-        # Calculate marker rotation angle using rvec
-        marker_angle, z_prime = calculate_marker_angle(rvec)
-        
-        # Calculate errors for PID tuning analysis
-        error_x = x  # Left/Right error
-        error_y = y  # Up/Down error
-        error_z = z - dis  # Forward/Back error (target 80cm)
-        # print(error_z)
-        
-        x_m = ["MARKER_5_X_TOL"]
-        y_m = ["MARKER_5_Y_TOL"]
-        z_m = ["MARKER_5_Z_TOL"]
-        if abs(error_z) < z_m and abs(error_x) < x_m and abs(error_y) < y_m:
+        z = z - dis
+        # angle alignment
+        marker_angle, _ = calculate_marker_angle(rvec)
+        # normalize to [-180, 180]
+        angle_err = marker_angle
+
+        # PID for x/y/z
+        lr = int(ctx.pid_lr.update(x, sleep=0.0))
+        ud = int(ctx.pid_ud.update(y, sleep=0.0))
+        fb = int(ctx.pid_fb.update(z, sleep=0.0))
+
+        # keep distance constant here (fb=0)
+        self.send_rc(lr*1.5, fb*1.5, -ud*1.5, -angle_err*3)
+
+        # check tolerances (x/y and angle)
+        tol_x = ctx.params.get("MARKER_3_X_TOL", 5)
+        tol_y = ctx.params.get("MARKER_3_Y_TOL", 5)
+        tol_z = ctx.params.get("MARKER_3_Z_TOL", 5)
+        tol_a = ctx.params.get("MARKER_3_ANGLE_TOL", 1)
+
+        if abs(x) <= tol_x and abs(y) <= tol_y and abs(z) <= tol_z and abs(angle_err) <= tol_a:
             self.hover()
             self.ctx.drone.land()
             return State.DONE
-        
-        
-        # Step 2: Use PID to get control outputs
-        yaw_update = ctx.pid_lr.update(error_x, sleep=0.0)    # Left/Right movement
-        ud_update = ctx.pid_ud.update(error_y, sleep=0.0)       # Up/Down movement
-        fb_update = ctx.pid_fb.update(error_z, sleep=0.0)        # Forward/Back movement
-    
-        
-        # Step 3: Apply speed limiting to prevent loss of control (建議限制最高速度防止失控)
-        rot_speed = ctx.params["FOLLOW_ROT_SPE"]
-        x_speed = ctx.params["FOLLOW_X_SPE"]
-        y_speed = ctx.params["FOLLOW_Y_SPE"]
-        z_speed = ctx.params["FOLLOW_Z_SPE"]
-                
-        # Limit yaw (left/right) speed
-        if yaw_update > x_speed:
-            yaw_update = x_speed
-        elif yaw_update < -x_speed:
-            yaw_update = -x_speed
-        
-        # Limit up/down speed  
-        if ud_update > y_speed:
-            ud_update = y_speed
-        elif ud_update < -y_speed:
-            ud_update = -y_speed
-        
-        # Limit forward/back speed
-        if fb_update > z_speed:
-            fb_update = z_speed
-        elif fb_update < -z_speed:
-            fb_update = -z_speed
-        
-        # Add rotation control based on marker orientation with proper angle normalization
-        # Target alignment angle - we want the marker to appear level in the image
-        # 0° = horizontal alignment (marker appears level)
-        target_alignment_angle = 0.0
-        
-        # Calculate shortest angle error  
-        angle_error = (marker_angle - target_alignment_angle) * 1.5
-        
-        # Dead zone - don't rotate if error is small (prevents jittering)
-        angle_dead_zone = 1.0  # degrees - larger dead zone for stability
-        if abs(angle_error) < angle_dead_zone:
-            angle_error = 0
-        
-        # Apply speed limiting for rotation
-        if angle_error > rot_speed:
-            angle_error = rot_speed
-        elif angle_error < -rot_speed:
-            angle_error = -rot_speed
-        
-        self.send_rc(int(yaw_update), int(fb_update), int(-ud_update), int(-angle_error))
-        return State.ALIGN_Y5_FLIP_LAND
 
-    def handle_DONE(self, ctx: Context) -> State:  # move forward and land
+    def handle_DONE(self, ctx: Context) -> State:
         return State.DONE
     
 
@@ -1030,7 +973,7 @@ def main():
 
     pid_lr = PID(kP=0.5, kI=0.0, kD=0.0)
     pid_ud = PID(kP=0.5, kI=0.0, kD=0.0)
-    pid_fb = PID(kP=0.4, kI=0.0, kD=0.0)
+    pid_fb = PID(kP=0.5, kI=0.0, kD=0.0)
     pid_lr.initialize(); pid_ud.initialize(); pid_fb.initialize()
 
     detector = MarkerDetector(marker_size_cm=15, calib_path="calib_tello.xml")
