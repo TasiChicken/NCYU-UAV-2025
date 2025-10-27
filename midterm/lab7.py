@@ -13,6 +13,11 @@ from typing import Dict, Tuple, Optional
 from djitellopy import Tello
 from pyimagesearch.pid import PID
 
+import logging
+
+# 方案 A：全域把最低等級調到 WARNING（不顯示 INFO）
+logging.basicConfig(level=logging.WARNING, force=True)
+
 def calculate_marker_angle(rvec):
     R, _ = cv2.Rodrigues(rvec)
     angle_rad = math.atan2(-R[1, 0], R[0, 0])
@@ -162,11 +167,11 @@ class Context:
         "ASCENT_SPEED": 40,        
         "SEARCH_RIGHT_SPEED": 30,
         "CENTER_X_TOL": 15.0,
-        "CENTER_Y_TOL": 15.0,
+        "CENTER_Y_TOL": 20.0,
         "TARGET_Z": 90.0,
-        "Z_TOL": 8.0,
+        "Z_TOL": 7.0,
         "STRAFE_LEFT_CM": 70,
-        "STRAFE_RC": 35,          # 側移 RC 速度
+        "STRAFE_RC":30,          # 側移 RC 速度
         "STRAFE_TIME_1M": 2.2,    # 估 2.2 秒 ≈ 1m（需實機校正）
         "STRAFE_TIME_SCAN": 1.0,   # 側移掃描時間
         "CREEP_FB": 15,           # 慢速前進 RC
@@ -176,9 +181,9 @@ class Context:
 
 
         # following
-        "FOLLOW_ID": 1,             # 要跟隨的 marker
+        "FOLLOW_ID": 0,             # 要跟隨的 marker
         "FOLLOW_DIS": 60.0,
-        "FOLLOW_ROT_SPE": 40.0,
+        "FOLLOW_ROT_SPE": 60.0,
         "FOLLOW_X_SPE": 20.0,
         "FOLLOW_Y_SPE": 20.0,
         "FOLLOW_Z_SPE": 25.0,
@@ -201,7 +206,7 @@ class Context:
 class DroneFSM:
     def __init__(self, ctx: Context):
         self.ctx = ctx
-        self.state = State.CREEP_FORWARD
+        self.state = State.ASCEND_SEARCH
         self.strafe_t0 = None
         self.handlers = {
             State.ASCEND_SEARCH      : self.handle_ASCEND_SEARCH,
@@ -470,7 +475,7 @@ class DroneFSM:
                 self.strafe_t0 = time.time()
 
             direction_sign = ctx.params["OPPOSITE_STRAFE_SIGN"]
-            self.send_rc(direction_sign * 20, 0, 0, 0)
+            self.send_rc(direction_sign * 30, 0, 0, 0)
             if time.time() - self.strafe_t0 > 2.2:
                 self.strafe_t0 = None
                 return State.CREEP_FORWARD
@@ -516,7 +521,7 @@ class DroneFSM:
         error_x = x  # Left/Right error
         error_y = y  # Up/Down error
         error_z = z - target_dist  # Forward/Back error (target 80cm)
-        print(error_z)
+        # print(error_z)
         
         
         # Step 2: Use PID to get control outputs
