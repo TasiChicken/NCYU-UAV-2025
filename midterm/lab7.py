@@ -129,14 +129,9 @@ class MarkerDetector:
 
 class State(enum.Enum):
     ASCEND_SEARCH        = enum.auto()
-    CENTER_ONE           = enum.auto()
-    SCAN_SECOND          = enum.auto()
-    DECIDE_TARGET        = enum.auto()
     CENTER_ON_TARGET     = enum.auto()
     FORWARD_TO_TARGET    = enum.auto()
     STRAFE_OPPOSITE      = enum.auto()
-    CREEP_FORWARD        = enum.auto()
-    DONE                 = enum.auto()
 
     FOLLOW_MARKER_ID     = enum.auto() 
     PASS_UNDER_TABLE_3   = enum.auto() 
@@ -145,6 +140,7 @@ class State(enum.Enum):
     OVERBOARD_TO_FIND_5  = enum.auto() 
 
     ALIGN_Y5_FLIP_LAND   = enum.auto()
+    DONE                 = enum.auto()
 
 @dataclass
 class Context:
@@ -165,21 +161,20 @@ class Context:
         "ID2": 2,
         "TARGET_ID": None,
         "ASCENT_SPEED": 40,        
-        "SEARCH_RIGHT_SPEED": 30,
-        "CENTER_X_TOL": 15.0,
+        "CENTER_X_TOL": 13.0,
         "CENTER_Y_TOL": 20.0,
-        "TARGET_Z": 120.0,
-        "Z_TOL": 10.0,
-        "STRAFE_RC":25,          # 側移 RC 速度
-        "CREEP_FB": 15,           # 慢速前進 RC
+        "Z_TOL": 5.0,
+        "STRAFE_":25,          # 側移 RC 速度
         "MAX_RC": 40,
         "OPPOSITE_STRAFE_SIGN": 0, # 之後決定
-        "PHASE": 0,             # 掃描階段計數器
+        "STRAFE_SPEED": 25,     # 側移速度
+        "STRAFE_TIME": 1.5,     # 側移時間
+        "TARGET_DIST": 50.0,   # 前進目標距離（cm）
 
 
         # following
-        "FOLLOW_ID": 0,             # 要跟隨的 marker
-        "FOLLOW_DIS": 50.0,
+        "FOLLOW_ID": 3,             # 要跟隨的 marker
+        "FOLLOW_DIS": 80.0,
         "FOLLOW_ROT_SPE": 60.0,
         "FOLLOW_X_SPE": 25.0,
         "FOLLOW_Y_SPE": 25.0,
@@ -189,7 +184,7 @@ class Context:
         "MARKER_4": 4,              # 牆上定位用的 marker
         "MARKER_5": 5,              # 終點判斷用的 marker
         "ROTATE_DEG": 90,           # 右轉角度
-        "OVERBOARD_LR": -15,        # 往左水平移動的 rc 速度
+        "OVERBOARD_LR": -15,        # 往左水平移動的 rc 速度 
         "OVERBOARD_UD": +8,         # 往上微升的 rc 速度
         "TRACK_STABLE_N": 5,        # 連續幀數達標才視為穩定  
 
@@ -197,10 +192,10 @@ class Context:
         "Y_TOL": 2.0,              # y 距離容許誤差（cm）    
         "ANGLE_TOL": 4.0,          # 角度容許誤差（deg）
 
-        "MARKER_5_DIS": 150,
-        "MARKER_5_X_TOL": 3,
+        "MARKER_5_DIS": 150,   
+        "MARKER_5_X_TOL": 5,
         "MARKER_5_Y_TOL": 10,
-        "MARKER_5_Z_TOL": 3,
+        "MARKER_5_Z_TOL": 5,
     })
 
 class DroneFSM:
@@ -210,13 +205,10 @@ class DroneFSM:
         self.strafe_t0 = None
         self.handlers = {
             State.ASCEND_SEARCH      : self.handle_ASCEND_SEARCH,
-            State.CENTER_ONE         : self.handle_CENTER_ONE,
-            State.SCAN_SECOND        : self.handle_SCAN_SECOND,
-            State.DECIDE_TARGET      : self.handle_DECIDE_TARGET,
             State.CENTER_ON_TARGET   : self.handle_CENTER_ON_TARGET,
             State.FORWARD_TO_TARGET  : self.handle_FORWARD_TO_TARGET,
             State.STRAFE_OPPOSITE    : self.handle_STRAFE_OPPOSITE,
-            State.CREEP_FORWARD      : self.handle_CREEP_FORWARD,
+
 
             State.FOLLOW_MARKER_ID:       self.handle_FOLLOW_MARKER_ID,
             State.PASS_UNDER_TABLE_3:     self.handle_PASS_UNDER_TABLE_3,
@@ -355,112 +347,40 @@ class DroneFSM:
         frame = ctx.frame_read.frame
         cv2.putText(frame, "ASCEND_SEARCH", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,255), 2)
 
-        if ctx.last_ids is not None and (ctx.params["ID1"] in ctx.last_poses or ctx.params["ID2"] in ctx.last_poses):
-            return State.CENTER_ONE
+        poses = ctx.last_poses
+        if ctx.params["ID1"] in poses and ctx.params["ID2"] in poses: # seen both
+            target_id = self._pick_farther_id(poses)
+            non_target_id = 1 if target_id == 2 else 2
+            ctx.params["TARGET_ID"] = target_id
+
+            x_far = float(poses[target_id][1][0][0])
+            x_near = float(poses[non_target_id][1][0][0])
+            
+            if x_far - x_near > 0: # far is right reletive to near
+                ctx.params["OPPOSITE_STRAFE_SIGN"] = -1   # strafe left 
+            else:
+                ctx.params["OPPOSITE_STRAFE_SIGN"] = +1   # strafe right 
+            return State.CENTER_ON_TARGET
 
         # 依你的約定 ud<0 上升
         self.send_rc(0, 0, ctx.params["ASCENT_SPEED"], 0)
         return State.ASCEND_SEARCH
-    
-    def handle_CENTER_ONE(self, ctx):
-        frame = ctx.frame_read.frame
-        cv2.putText(frame, "CENTER_ONE", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,255), 2)
-        try:
-            ids = ctx.last_ids 
-            #if seen both
-            if ctx.params["ID1"] in ctx.last_poses and ctx.params["ID2"] in ctx.last_poses:
-                return State.DECIDE_TARGET
-            #if seen one, center on it
-            vis_ids = [i for i in [ctx.params["ID1"], ctx.params["ID2"]] if i in ctx.last_poses]
-            tid = vis_ids[0]
-            rvec, tvec = ctx.last_poses[tid]
-            x, y, z = tvec[0][0], tvec[1][0], tvec[2][0]
-            lr = ctx.pid_lr.update(x, 0.0)
-            ud = ctx.pid_ud.update(y, 0.0)
-            self.send_rc(lr, 0, -ud, 0)
-            #check if centered
-            if abs(x) < ctx.params["CENTER_X_TOL"]+5 and abs(y) < ctx.params["CENTER_Y_TOL"]+5:
-                return State.SCAN_SECOND
-            return State.CENTER_ONE
-        except KeyError:
-            self.send_rc(0, 0, 0, 0)
-            return State.CENTER_ONE
-        except IndexError:
-            self.send_rc(0, 0, 0, 0)
-            return State.CENTER_ONE
-
-    
-    def handle_SCAN_SECOND(self, ctx):
-        
-        frame = ctx.frame_read.frame
-        cv2.putText(frame, "SCAN_SECOND", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,255), 2)
-        try:
-            ids = ctx.last_ids       
-            #if seen both
-            if ctx.params["ID1"] in ctx.last_poses and ctx.params["ID2"] in ctx.last_poses:
-                self.strafe_t0 = None #reset strafe timer
-                return State.DECIDE_TARGET
-            
-            # go left and go right to scan
-            v = ctx.params["STRAFE_RC"]
-            phase = ctx.params["PHASE"]
-            sign = 1 if phase % 2 == 0 else -1
-            self.send_rc(sign * v, 0, 0, 0)  
-            if self.strafe_t0 is None:
-                self.strafe_t0 = time.time()
-            if time.time() - self.strafe_t0 > (phase * 2.5 + 1.0): 
-                ctx.params["PHASE"] += 1 
-                self.strafe_t0 = time.time()
-            return State.SCAN_SECOND
-        except KeyError:
-            self.send_rc(0, 0, 0, 0)
-            return State.SCAN_SECOND
-    
-    def handle_DECIDE_TARGET(self, ctx):
-        frame = ctx.frame_read.frame
-        cv2.putText(frame, "DECIDE_TARGET", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,255), 2)
-
-        poses = ctx.last_poses
-        id1_in = ctx.params["ID1"] in poses
-        id2_in = ctx.params["ID2"] in poses
-
-
-        # 1) 選較遠的目標
-        self.ids_candidates = [ctx.params["ID1"], ctx.params["ID2"]]
-        if len(poses) < 2:
-            return State.SCAN_SECOND
-        
-        target_id = self._pick_farther_id(poses)
-
-        ctx.params["TARGET_ID"] = target_id
-
-        # 2) 依目標當下的左右位置，決定「丟失時要側移的相反方向」
-        #    x>0 = 目標在右 → 丟失時往左掃（-1）；x<0 = 目標在左 → 丟失時往右掃（+1）
-        x_far = float(poses[target_id][1][0][0])
-        if x_far > 0:
-            ctx.params["OPPOSITE_STRAFE_SIGN"] = -1   # 之後 recover/scan 用：左
-        else:
-            ctx.params["OPPOSITE_STRAFE_SIGN"] = +1   # 之後 recover/scan 用：右
-
-        return State.CENTER_ON_TARGET
     
     def handle_CENTER_ON_TARGET(self, ctx):
         frame = ctx.frame_read.frame
         cv2.putText(frame, "CENTER_ON_TARGET", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,255), 2)
 
         target_id = ctx.params["TARGET_ID"]
-        # if target_id not in ctx.last_poses:
-        #     return State.ASCEND_SEARCH
+
         try:
-            rvec, tvec = ctx.last_poses[target_id]
+            _, tvec = ctx.last_poses[target_id]
             x, y, z = tvec[0][0], tvec[1][0], tvec[2][0]
             lr = ctx.pid_lr.update(x, 0.0)
             ud = ctx.pid_ud.update(y, 0.0)
-            fb = ctx.pid_fb.update(z - ctx.params["TARGET_Z"], sleep=0.0)
-            self.send_rc(lr, fb, -ud, 0)
+
+            self.send_rc(lr, 0, -ud, 0)
             #check if centered
-            if abs(x) < ctx.params["CENTER_X_TOL"]+5 and abs(y) < ctx.params["CENTER_Y_TOL"]+5 and abs(z - ctx.params["TARGET_Z"]) < ctx.params["Z_TOL"]:
-                self.reset_pids()
+            if abs(x) < ctx.params["CENTER_X_TOL"] and abs(y) < ctx.params["CENTER_Y_TOL"]:
                 return State.FORWARD_TO_TARGET
             return State.CENTER_ON_TARGET
         except KeyError:
@@ -471,49 +391,33 @@ class DroneFSM:
     def handle_FORWARD_TO_TARGET(self, ctx):
         frame = ctx.frame_read.frame
         cv2.putText(frame, "FORWARD_TO_TARGET", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,255), 2)
+
         try:
             target_id = ctx.params["TARGET_ID"]
-            rvec, tvec = ctx.last_poses[target_id]
+            _, tvec = ctx.last_poses[target_id]
             z = tvec[2][0]
-            fb = ctx.pid_fb.update(z - 40.0, sleep=0.0)     # move to 40cm in front of marker
+            fb = ctx.pid_fb.update(z - ctx.params["TARGET_DIST"], sleep=0.0)     
             self.send_rc(0, fb, 0, 0)
-            #check if close enough
-            if z < 45.0:
-                self.reset_pids()
+            if z < ctx.params["TARGET_DIST"] + ctx.params["Z_TOL"]:
                 return State.STRAFE_OPPOSITE
             return State.FORWARD_TO_TARGET
-        except KeyError:
+        except KeyError: #can not find target, too close or lagging
             self.send_rc(0, 0, 0, 0)
             return State.STRAFE_OPPOSITE
     
     def handle_STRAFE_OPPOSITE(self, ctx):
         frame = ctx.frame_read.frame
         cv2.putText(frame, "STRAFE_OPPOSITE", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,255), 2)
+        if self.strafe_t0 is None:
+            self.strafe_t0 = time.time()
 
-        try:
-            if self.strafe_t0 is None:
-                self.strafe_t0 = time.time()
-
-            direction_sign = ctx.params["OPPOSITE_STRAFE_SIGN"]
-            self.send_rc(direction_sign * 30, 0, 0, 0)
-            if time.time() - self.strafe_t0 > 2.2:
-                self.strafe_t0 = None
-                return State.FOLLOW_MARKER_ID
-            return State.STRAFE_OPPOSITE
-        except KeyError:
-            self.send_rc(0, 0, 0, 0)
-            return State.STRAFE_OPPOSITE
-    
-    def handle_CREEP_FORWARD(self, ctx):
-        frame = ctx.frame_read.frame
-        cv2.putText(frame, "CREEP_FORWARD", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,255), 2)
-
-        self.send_rc(0, ctx.params["CREEP_FB"], 0, 0)
-
-        if ctx.last_ids is not None and ctx.params["FOLLOW_ID"] in ctx.last_poses:
+        direction_sign = ctx.params["OPPOSITE_STRAFE_SIGN"]
+        self.send_rc(direction_sign * ctx.params["STRAFE_SPEED"], 0, 0, 0)
+        if time.time() - self.strafe_t0 > ctx.params["STRAFE_TIME"]:
+            self.strafe_t0 = None
             return State.FOLLOW_MARKER_ID
-        
-        return State.CREEP_FORWARD
+        return State.STRAFE_OPPOSITE
+
 
     def handle_FOLLOW_MARKER_ID(self, ctx: Context) -> State:
         tid = ctx.params["FOLLOW_ID"]
@@ -552,8 +456,9 @@ class DroneFSM:
 
 
         if fb_update < 0:
-           fb_update = fb_update * 1.5
-        
+           fb_update = fb_update * 4
+        if ud_update > 0:
+            ud_update *= 10
         
         # Step 3: Apply speed limiting to prevent loss of control (建議限制最高速度防止失控)
         rot_speed = ctx.params["FOLLOW_ROT_SPE"]
@@ -586,7 +491,6 @@ class DroneFSM:
 
                 
         print(f"error x:{error_x}, error y:{error_y}, error z:{error_z}, error a:{angle_error}")
-        print(f'fb err{yaw_update}')
         print(f'fb err{fb_update}')
         
         # Dead zone - don't rotate if error is small (prevents jittering)
@@ -783,7 +687,7 @@ class DroneFSM:
             ROTATE_DEG = ctx.params.get("ROTATE_DEG", 90)
             ROTATE_SPEED = ctx.params.get("ROTATE_SPEED", 40)  # Degrees per second
             rotate_yaw = ctx.params.get("ROTATE_YAW", 50)
-            ROTATE_TIME = 3
+            ROTATE_TIME = 3.5
             
             elapsed = time.time() - self._rotate_t0
             
