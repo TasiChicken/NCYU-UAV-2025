@@ -197,15 +197,15 @@ class Context:
         "Y_TOL": 2.0,              # y 距離容許誤差（cm）    
         "ANGLE_TOL": 4.0,          # 角度容許誤差（deg）
 
-        "MARKER_5_DIS": 50,
-        "MARKER_5_X_TOL": 2.0,
-        "MARKER_5_Y_TOL": 2.0,
-        "MARKER_5_Z_TOL": 2.0
+        "MARKER_5_DIS": 150,
+        "MARKER_5_X_TOL": 5,
+        "MARKER_5_Y_TOL": 5,
+        "MARKER_5_Z_TOL": 5,
     })
 
 class DroneFSM:
     def __init__(self, ctx: Context):
-        self.state = State.FOLLOW_MARKER_ID
+        self.state = State.PASS_UNDER_TABLE_3
         self.ctx = ctx
         self.strafe_t0 = None
         self.handlers = {
@@ -241,6 +241,26 @@ class DroneFSM:
 
     def send_rc(self, lr: float, fb: float, ud: float, yaw: float):
         lr, fb, ud, yaw = map(self.clip, (lr, fb, ud, yaw))
+        if(lr < 0 and lr > -8):
+            lr = -8
+        if(lr > 0 and lr < 8):
+            lr = 8
+
+        if(fb < 0 and fb > -8):
+            fb = -8
+        if(fb > 0 and fb < 8):
+            fb = 8
+
+        if(ud < 0 and ud > -8):
+            ud = -8
+        if(ud > 0 and ud < 8):
+            ud = 8
+
+        if(yaw < 0 and yaw > -8):
+            yaw = -8
+        if(yaw > 0 and yaw < 8):
+            yaw = 8                                    
+
         if self.ctx.simulation or not self.ctx.airborne:
             self._record_cmd(f"[SIM RC] lr:{lr} fb:{fb} ud:{ud} yaw:{yaw}")
             return
@@ -661,15 +681,15 @@ class DroneFSM:
             yaw_cmd = angle_err  # negative to reduce error
 
             # keep distance constant here (fb=0)
-            self.send_rc(lr*1.5, fb*1.2, -ud*1.2, -yaw_cmd*3)
+            self.send_rc(lr*2, fb*2, -ud*2, -yaw_cmd*5)
 
             # check tolerances (x/y and angle)
             tol_x = 5
             tol_y = 10
             tol_z = 5
-            tol_a = 0.8
+            tol_a = 1
             if abs(x) <= tol_x and abs(y) <= tol_y and abs(z) <= tol_z and abs(angle_err) <= tol_a:
-                self._pass_stable += 1
+                self._pass_stable += 2
                 cv2.putText(frame, f"Centered+Aligned stable {self._pass_stable}/{ctx.params['TRACK_STABLE_N']}",
                            (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
                 
@@ -712,7 +732,7 @@ class DroneFSM:
         
         # Phase 3: Move forward 2m (200cm)
         if self._pass_phase == 3:
-            FORWARD_TIME = ctx.params.get("PASS_FORWARD_TIME", 4)
+            FORWARD_TIME = ctx.params.get("PASS_FORWARD_TIME", 4.1)
             forward_fb = ctx.params.get("PASS_FORWARD_FB", 40)
             elapsed = time.time() - self._pass_t0
             
@@ -761,9 +781,9 @@ class DroneFSM:
         # Phase 1: Rotate 90 degrees
         if self._rotate_phase == 1:
             ROTATE_DEG = ctx.params.get("ROTATE_DEG", 90)
-            ROTATE_SPEED = ctx.params.get("ROTATE_SPEED", 30)  # Degrees per second
-            rotate_yaw = ctx.params.get("ROTATE_YAW", 40)
-            ROTATE_TIME = ROTATE_DEG / ROTATE_SPEED
+            ROTATE_SPEED = ctx.params.get("ROTATE_SPEED", 40)  # Degrees per second
+            rotate_yaw = ctx.params.get("ROTATE_YAW", 50)
+            ROTATE_TIME = 3
             
             elapsed = time.time() - self._rotate_t0
             
@@ -826,7 +846,8 @@ class DroneFSM:
         err_x = x
         err_y = y
         err_z = z - 100
-        
+        marker_angle, z_prime = calculate_marker_angle(rvec)
+        marker_angle *= 4
         lr = int(ctx.pid_lr.update(err_x, sleep=0.0))
         ud = int(ctx.pid_ud.update(err_y, sleep=0.0))
         fb = int(ctx.pid_ud.update(err_z, sleep=0.0))
@@ -836,13 +857,13 @@ class DroneFSM:
         ud = max(-cap, min(cap, ud))
         
         # Send control command (note: ud sign is flipped for camera-to-drone coordinate)
-        self.send_rc(lr, fb, -ud, 0)
+        self.send_rc(lr, fb, -ud, -marker_angle)
         
         # Check if centered within tolerance
         if (abs(err_x) <= ctx.params["CENTER_X_TOL"] and 
             abs(err_y) <= ctx.params["CENTER_Y_TOL"] and
             abs(err_z) <= 5):
-            self._ascend_stable += 1
+            self._ascend_stable += 2
             cv2.putText(frame, f"Locked! Stable: {self._ascend_stable}/{ctx.params['TRACK_STABLE_N']}", 
                        (10, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
         else:
@@ -891,7 +912,7 @@ class DroneFSM:
                 return State.OVERBOARD_TO_FIND_5
 
             ascend_ud = int(ctx.params.get("OVERBOARD_ASCEND_UD", 40))
-            ascend_time = float(ctx.params.get("OVERBOARD_ASCEND_TIME", 1.0))
+            ascend_time = float(ctx.params.get("OVERBOARD_ASCEND_TIME", 1.3))
 
             if self._over_t0 is None:
                 self._over_t0 = time.time()
@@ -953,14 +974,22 @@ class DroneFSM:
         error_y = y  # Up/Down error
         error_z = z - dis  # Forward/Back error (target 80cm)
         # print(error_z)
+
         
-        x_m = ["MARKER_5_X_TOL"]
-        y_m = ["MARKER_5_Y_TOL"]
-        z_m = ["MARKER_5_Z_TOL"]
+        
+        x_m = ctx.params["MARKER_5_X_TOL"]
+        y_m = ctx.params["MARKER_5_Y_TOL"]
+        z_m = ctx.params["MARKER_5_Z_TOL"]
         if abs(error_z) < z_m and abs(error_x) < x_m and abs(error_y) < y_m:
-            self.hover()
-            self.ctx.drone.land()
-            return State.DONE
+            _ascend_stable += 1
+            if(_ascend_stable == 3):
+                self.hover()
+                self.ctx.drone.land()
+                return State.DONE
+            else:
+                return State.ALIGN_Y5_FLIP_LAND
+        
+        self._ascend_stable = 0
         
         
         # Step 2: Use PID to get control outputs
