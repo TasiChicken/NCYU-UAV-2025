@@ -13,7 +13,13 @@ def get_otsu(gray):
             continue
         var1 = np.var(group1)
         var2 = np.var(group2)
-        within_var = var1 + var2
+        # use weighted within-class variance (Otsu): w1*var1 + w2*var2
+        n1 = len(group1)
+        n2 = len(group2)
+        N = n1 + n2
+        w1 = n1 / N
+        w2 = n2 / N
+        within_var = w1 * var1 + w2 * var2
         if within_var < min_within_var:
             min_within_var = within_var
             best_t = t
