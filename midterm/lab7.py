@@ -621,9 +621,10 @@ class DroneFSM:
         if self._pass_phase == 0:
             poses = getattr(ctx, "last_poses", {}) or {}
             if tid not in poses:
-                # Keep searching - gentle forward movement
-                search_ud = ctx.params.get("PASS_SEARCH_UD", 5)
-                self.send_rc(0, 0, search_ud, 0)
+                # Keep searching - gentle down movement
+                search_ud = ctx.params.get("PASS_SEARCH_UD", -10)
+                search_fb = ctx.params.get("PASS_SEARCH_FB", 10)
+                self.send_rc(0, search_fb, search_ud, 0)
                 cv2.putText(
                     frame,
                     f"Searching for Marker {tid}...",
