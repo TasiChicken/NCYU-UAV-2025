@@ -145,10 +145,17 @@ def foreground_detection(video_path: str,
         raise FileNotFoundError(video_path)
 
     # 取得影片參數
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    w  = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    h  = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    # 輸出影片：原始畫面 + 偵測框
+    out = cv2.VideoWriter(out_path, fourcc, fps, (w, h))
+    if not out.isOpened():
+        cap.release()
+        raise RuntimeError(f"Failed to open VideoWriter: {out_path}")
+    # 輸出影片：純前景 mask
+    out_mask = cv2.VideoWriter(mask_out_path, fourcc, fps, (w, h))
+    if not out_mask.isOpened():
+        cap.release()
+        out.release()
+        raise RuntimeError(f"Failed to open VideoWriter: {mask_out_path}")    h  = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
     # 輸出影片：原始畫面 + 偵測框
     out = cv2.VideoWriter(out_path, fourcc, fps, (w, h))
