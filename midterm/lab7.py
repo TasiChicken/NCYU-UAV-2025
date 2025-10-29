@@ -2,29 +2,24 @@
 # Drone ArUco FSM with SIMULATION (no RC sent when simulate=True)
 # =========================
 
-import cv2
 import time
 import enum
 import math
-import numpy as np
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Dict, Tuple, Optional
 from djitellopy import Tello
+import numpy as np
+import cv2
 from pyimagesearch.pid import PID
-
-import logging
-
-# 方案 A：全域把最低等級調到 WARNING（不顯示 INFO）
-logging.basicConfig(level=logging.WARNING, force=True)
 
 
 def calculate_marker_angle(rvec):
-    R, _ = cv2.Rodrigues(rvec)
-    angle_rad = math.atan2(-R[1, 0], R[0, 0])
+    rotation_matrix, _ = cv2.Rodrigues(rvec)
+    angle_rad = math.atan2(-rotation_matrix[1, 0], rotation_matrix[0, 0])
     angle_deg = math.degrees(angle_rad)
 
-    return angle_deg, R
+    return angle_deg, rotation_matrix
 
 
 def keyboard(drone: Tello, key: int, airborne: bool, simulation: bool):
@@ -35,7 +30,6 @@ def keyboard(drone: Tello, key: int, airborne: bool, simulation: bool):
     if key == -1:
         return False, None, None
 
-    # print("key:", key)
     fb_speed, lf_speed, ud_speed, degree = 40, 40, 50, 30
     is_move = False
     airborne_changed = None
@@ -48,23 +42,17 @@ def keyboard(drone: Tello, key: int, airborne: bool, simulation: bool):
 
     if key == ord("1"):
         if not simulation:
-            try:
-                drone.takeoff()
-                time.sleep(1.0)
-                airborne_changed = True
-                print("[KEY] takeoff")
-            except Exception as e:
-                print("takeoff failed:", e)
+            drone.takeoff()
+            time.sleep(1.0)
+            airborne_changed = True
+            print("[KEY] takeoff")
         else:
             print("[SIM] takeoff (not actually sent)")
     elif key == ord("2"):
         if not simulation:
-            try:
-                drone.land()
-                airborne_changed = False
-                print("[KEY] land")
-            except Exception as e:
-                print("land failed:", e)
+            drone.land()
+            airborne_changed = False
+            print("[KEY] land")
         else:
             print("[SIM] land (not actually sent)")
     elif key == ord("3"):
@@ -119,16 +107,21 @@ def keyboard(drone: Tello, key: int, airborne: bool, simulation: bool):
 class MarkerDetector:
     def __init__(self, marker_size_cm: float, calib_path="calib_tello.xml"):
         self.marker_size = marker_size_cm
-        self.aruco_dict = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
+        self.aruco_dict = cv2.aruco.getPredefinedDictionary(
+            cv2.aruco.DICT_4X4_50
+        )
         self.aruco_params = cv2.aruco.DetectorParameters()
-        self.detector = cv2.aruco.ArucoDetector(self.aruco_dict, self.aruco_params)
-        fs = cv2.FileStorage(calib_path, cv2.FILE_STORAGE_READ)
-        self.K = fs.getNode("K").mat()
-        self.D = fs.getNode("D").mat()
-        fs.release()
-        s = self.marker_size / 2.0
-        self.objPoints = np.array(
-            [[-s, s, 0], [s, s, 0], [s, -s, 0], [-s, -s, 0]], dtype=np.float32
+        self.detector = cv2.aruco.ArucoDetector(
+            self.aruco_dict, self.aruco_params
+        )
+        file_storage = cv2.FileStorage(calib_path, cv2.FILE_STORAGE_READ)
+        self.camera_intrinsics_matrix = file_storage.getNode("K").mat()
+        self.distortion_coefficients = file_storage.getNode("D").mat()
+        file_storage.release()
+        half_marker_size = self.marker_size / 2.0
+        self.obj_points = np.array(
+            [[-half_marker_size, half_marker_size, 0], [half_marker_size, half_marker_size, 0],
+            [half_marker_size, -half_marker_size, 0], [-half_marker_size, -half_marker_size, 0]], dtype=np.float32
         )
 
     def detect(self, gray):
@@ -137,7 +130,10 @@ class MarkerDetector:
         if ids is not None:
             for i, mid in enumerate(ids.flatten()):
                 success, rvec, tvec = cv2.solvePnP(
-                    self.objPoints, corners[i], self.K, self.D
+                    self.obj_points,
+                    corners[i],
+                    self.camera_intrinsics_matrix,
+                    self.distortion_coefficients,
                 )
                 if success:
                     poses[int(mid)] = (rvec, tvec)
@@ -149,13 +145,11 @@ class State(enum.Enum):
     CENTER_ON_TARGET = enum.auto()
     FORWARD_TO_TARGET = enum.auto()
     STRAFE_OPPOSITE = enum.auto()
-
     FOLLOW_MARKER_ID = enum.auto()
     PASS_UNDER_TABLE_3 = enum.auto()
     ROTATE_RIGHT_90 = enum.auto()
     ASCEND_LOCK_4 = enum.auto()
     OVERBOARD_TO_FIND_5 = enum.auto()
-
     ALIGN_Y5_FLIP_LAND = enum.auto()
     DONE = enum.auto()
 
@@ -291,6 +285,7 @@ class DroneFSM:
         print(f"[FSM] Start at {self.state.name} | SIMULATION={self.ctx.simulation}")
         while True:
             frame = self.ctx.frame_read.frame
+            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
             key = cv2.waitKey(1)
@@ -836,8 +831,6 @@ class DroneFSM:
 
         # Phase 1: Rotate 90 degrees
         if self._rotate_phase == 1:
-            ROTATE_DEG = ctx.params.get("ROTATE_DEG", 90)
-            ROTATE_SPEED = ctx.params.get("ROTATE_SPEED", 40)  # Degrees per second
             rotate_yaw = ctx.params.get("ROTATE_YAW", 50)
             ROTATE_TIME = 3.5
 
