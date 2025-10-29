@@ -18,12 +18,14 @@ import logging
 # 方案 A：全域把最低等級調到 WARNING（不顯示 INFO）
 logging.basicConfig(level=logging.WARNING, force=True)
 
+
 def calculate_marker_angle(rvec):
     R, _ = cv2.Rodrigues(rvec)
     angle_rad = math.atan2(-R[1, 0], R[0, 0])
     angle_deg = math.degrees(angle_rad)
-    
+
     return angle_deg, R
+
 
 def keyboard(drone: Tello, key: int, airborne: bool, simulation: bool):
     """
@@ -39,12 +41,12 @@ def keyboard(drone: Tello, key: int, airborne: bool, simulation: bool):
     airborne_changed = None
     simulation_changed = None
 
-    if key == ord('t'):
+    if key == ord("t"):
         simulation_changed = not simulation
         print(f"[KEY] toggle SIMULATION -> {simulation_changed}")
         return False, None, simulation_changed
 
-    if key == ord('1'):
+    if key == ord("1"):
         if not simulation:
             try:
                 drone.takeoff()
@@ -55,7 +57,7 @@ def keyboard(drone: Tello, key: int, airborne: bool, simulation: bool):
                 print("takeoff failed:", e)
         else:
             print("[SIM] takeoff (not actually sent)")
-    elif key == ord('2'):
+    elif key == ord("2"):
         if not simulation:
             try:
                 drone.land()
@@ -65,44 +67,54 @@ def keyboard(drone: Tello, key: int, airborne: bool, simulation: bool):
                 print("land failed:", e)
         else:
             print("[SIM] land (not actually sent)")
-    elif key == ord('3'):
+    elif key == ord("3"):
         if not simulation and airborne:
-            drone.send_rc_control(0, 0, 0, 0); is_move = True
+            drone.send_rc_control(0, 0, 0, 0)
+            is_move = True
         print("stop")
-    elif key == ord('w'):
+    elif key == ord("w"):
         if not simulation and airborne:
-            drone.send_rc_control(0, fb_speed, 0, 0); is_move = True
+            drone.send_rc_control(0, fb_speed, 0, 0)
+            is_move = True
         print("forward")
-    elif key == ord('s'):
+    elif key == ord("s"):
         if not simulation and airborne:
-            drone.send_rc_control(0, -fb_speed, 0, 0); is_move = True
+            drone.send_rc_control(0, -fb_speed, 0, 0)
+            is_move = True
         print("backward")
-    elif key == ord('a'):
+    elif key == ord("a"):
         if not simulation and airborne:
-            drone.send_rc_control(-lf_speed, 0, 0, 0); is_move = True
+            drone.send_rc_control(-lf_speed, 0, 0, 0)
+            is_move = True
         print("left")
-    elif key == ord('d'):
+    elif key == ord("d"):
         if not simulation and airborne:
-            drone.send_rc_control(lf_speed, 0, 0, 0); is_move = True
+            drone.send_rc_control(lf_speed, 0, 0, 0)
+            is_move = True
         print("right")
-    elif key == ord('x'):
+    elif key == ord("x"):
         if not simulation and airborne:
-            drone.send_rc_control(0, 0, +ud_speed, 0); is_move = True
+            drone.send_rc_control(0, 0, +ud_speed, 0)
+            is_move = True
         print("up")
-    elif key == ord('z'):
+    elif key == ord("z"):
         if not simulation and airborne:
-            drone.send_rc_control(0, 0, -ud_speed, 0); is_move = True
+            drone.send_rc_control(0, 0, -ud_speed, 0)
+            is_move = True
         print("down")
-    elif key == ord('c'):
+    elif key == ord("c"):
         if not simulation and airborne:
-            drone.send_rc_control(0, 0, 0, +degree); is_move = True
+            drone.send_rc_control(0, 0, 0, +degree)
+            is_move = True
         print("rotate cw")
-    elif key == ord('v'):
+    elif key == ord("v"):
         if not simulation and airborne:
-            drone.send_rc_control(0, 0, 0, -degree); is_move = True
+            drone.send_rc_control(0, 0, 0, -degree)
+            is_move = True
         print("rotate ccw")
 
     return is_move, airborne_changed, simulation_changed
+
 
 class MarkerDetector:
     def __init__(self, marker_size_cm: float, calib_path="calib_tello.xml"):
@@ -115,32 +127,38 @@ class MarkerDetector:
         self.D = fs.getNode("D").mat()
         fs.release()
         s = self.marker_size / 2.0
-        self.objPoints = np.array([[-s, s, 0], [s, s, 0], [s, -s, 0], [-s, -s, 0]], dtype=np.float32)
+        self.objPoints = np.array(
+            [[-s, s, 0], [s, s, 0], [s, -s, 0], [-s, -s, 0]], dtype=np.float32
+        )
 
     def detect(self, gray):
         corners, ids, _ = self.detector.detectMarkers(gray)
         poses = {}
         if ids is not None:
             for i, mid in enumerate(ids.flatten()):
-                success, rvec, tvec = cv2.solvePnP(self.objPoints, corners[i], self.K, self.D)
+                success, rvec, tvec = cv2.solvePnP(
+                    self.objPoints, corners[i], self.K, self.D
+                )
                 if success:
                     poses[int(mid)] = (rvec, tvec)
         return ids, poses
 
+
 class State(enum.Enum):
-    ASCEND_SEARCH        = enum.auto()
-    CENTER_ON_TARGET     = enum.auto()
-    FORWARD_TO_TARGET    = enum.auto()
-    STRAFE_OPPOSITE      = enum.auto()
+    ASCEND_SEARCH = enum.auto()
+    CENTER_ON_TARGET = enum.auto()
+    FORWARD_TO_TARGET = enum.auto()
+    STRAFE_OPPOSITE = enum.auto()
 
-    FOLLOW_MARKER_ID     = enum.auto() 
-    PASS_UNDER_TABLE_3   = enum.auto() 
-    ROTATE_RIGHT_90      = enum.auto() 
-    ASCEND_LOCK_4        = enum.auto() 
-    OVERBOARD_TO_FIND_5  = enum.auto() 
+    FOLLOW_MARKER_ID = enum.auto()
+    PASS_UNDER_TABLE_3 = enum.auto()
+    ROTATE_RIGHT_90 = enum.auto()
+    ASCEND_LOCK_4 = enum.auto()
+    OVERBOARD_TO_FIND_5 = enum.auto()
 
-    ALIGN_Y5_FLIP_LAND   = enum.auto()
-    DONE                 = enum.auto()
+    ALIGN_Y5_FLIP_LAND = enum.auto()
+    DONE = enum.auto()
+
 
 @dataclass
 class Context:
@@ -156,47 +174,45 @@ class Context:
     airborne: bool = False
     simulation: bool = True  # ★ 預設模擬開啟
     last_cmd_texts: deque = field(default_factory=lambda: deque(maxlen=1))
-    params: dict = field(default_factory=lambda: {
-        "ID1": 1,
-        "ID2": 2,
-        "TARGET_ID": None,
-        "ASCENT_SPEED": 40,        
-        "CENTER_X_TOL": 13.0,
-        "CENTER_Y_TOL": 20.0,
-        "Z_TOL": 5.0,
-        "STRAFE_":25,          # 側移 RC 速度
-        "MAX_RC": 40,
-        "OPPOSITE_STRAFE_SIGN": 0, # 之後決定
-        "STRAFE_SPEED": 25,     # 側移速度
-        "STRAFE_TIME": 1.5,     # 側移時間
-        "TARGET_DIST": 50.0,   # 前進目標距離（cm）
+    params: dict = field(
+        default_factory=lambda: {
+            "ID1": 1,
+            "ID2": 2,
+            "TARGET_ID": None,
+            "ASCENT_SPEED": 40,
+            "CENTER_X_TOL": 13.0,
+            "CENTER_Y_TOL": 20.0,
+            "Z_TOL": 5.0,
+            "STRAFE_": 25,  # 側移 RC 速度
+            "MAX_RC": 40,
+            "OPPOSITE_STRAFE_SIGN": 0,  # 之後決定
+            "STRAFE_SPEED": 25,  # 側移速度
+            "STRAFE_TIME": 1.5,  # 側移時間
+            "TARGET_DIST": 50.0,  # 前進目標距離（cm）
+            # following
+            "FOLLOW_ID": 3,  # 要跟隨的 marker
+            "FOLLOW_DIS": 80.0,
+            "FOLLOW_ROT_SPE": 60.0,
+            "FOLLOW_X_SPE": 25.0,
+            "FOLLOW_Y_SPE": 25.0,
+            "FOLLOW_Z_SPE": 30.0,
+            "MARKER_3": 3,  # 穿桌用的 marker
+            "MARKER_4": 4,  # 牆上定位用的 marker
+            "MARKER_5": 5,  # 終點判斷用的 marker
+            "ROTATE_DEG": 90,  # 右轉角度
+            "OVERBOARD_LR": -15,  # 往左水平移動的 rc 速度
+            "OVERBOARD_UD": +8,  # 往上微升的 rc 速度
+            "TRACK_STABLE_N": 5,  # 連續幀數達標才視為穩定
+            "MARKER5_TARGET_Y": 0.0,  # 期望的相機座標系 y 距離（單位同 tvec，通常是 cm）
+            "Y_TOL": 2.0,  # y 距離容許誤差（cm）
+            "ANGLE_TOL": 4.0,  # 角度容許誤差（deg）
+            "MARKER_5_DIS": 150,
+            "MARKER_5_X_TOL": 5,
+            "MARKER_5_Y_TOL": 10,
+            "MARKER_5_Z_TOL": 5,
+        }
+    )
 
-
-        # following
-        "FOLLOW_ID": 3,             # 要跟隨的 marker
-        "FOLLOW_DIS": 80.0,
-        "FOLLOW_ROT_SPE": 60.0,
-        "FOLLOW_X_SPE": 25.0,
-        "FOLLOW_Y_SPE": 25.0,
-        "FOLLOW_Z_SPE": 30.0,
-
-        "MARKER_3": 3,              # 穿桌用的 marker
-        "MARKER_4": 4,              # 牆上定位用的 marker
-        "MARKER_5": 5,              # 終點判斷用的 marker
-        "ROTATE_DEG": 90,           # 右轉角度
-        "OVERBOARD_LR": -15,        # 往左水平移動的 rc 速度 
-        "OVERBOARD_UD": +8,         # 往上微升的 rc 速度
-        "TRACK_STABLE_N": 5,        # 連續幀數達標才視為穩定  
-
-        "MARKER5_TARGET_Y": 0.0,   # 期望的相機座標系 y 距離（單位同 tvec，通常是 cm）
-        "Y_TOL": 2.0,              # y 距離容許誤差（cm）    
-        "ANGLE_TOL": 4.0,          # 角度容許誤差（deg）
-
-        "MARKER_5_DIS": 150,   
-        "MARKER_5_X_TOL": 5,
-        "MARKER_5_Y_TOL": 10,
-        "MARKER_5_Z_TOL": 5,
-    })
 
 class DroneFSM:
     def __init__(self, ctx: Context):
@@ -204,21 +220,17 @@ class DroneFSM:
         self.ctx = ctx
         self.strafe_t0 = None
         self.handlers = {
-            State.ASCEND_SEARCH      : self.handle_ASCEND_SEARCH,
-            State.CENTER_ON_TARGET   : self.handle_CENTER_ON_TARGET,
-            State.FORWARD_TO_TARGET  : self.handle_FORWARD_TO_TARGET,
-            State.STRAFE_OPPOSITE    : self.handle_STRAFE_OPPOSITE,
-
-
-            State.FOLLOW_MARKER_ID:       self.handle_FOLLOW_MARKER_ID,
-            State.PASS_UNDER_TABLE_3:     self.handle_PASS_UNDER_TABLE_3,
-            State.ROTATE_RIGHT_90:        self.handle_ROTATE_RIGHT_90,
-            State.ASCEND_LOCK_4:          self.handle_ASCEND_LOCK_4,
-            State.OVERBOARD_TO_FIND_5:    self.handle_OVERBOARD_TO_FIND_5,
-
-            State.ALIGN_Y5_FLIP_LAND:     self.handle_ALIGN_Y5_FLIP_LAND,
-
-            State.DONE:            self.handle_DONE,
+            State.ASCEND_SEARCH: self.handle_ASCEND_SEARCH,
+            State.CENTER_ON_TARGET: self.handle_CENTER_ON_TARGET,
+            State.FORWARD_TO_TARGET: self.handle_FORWARD_TO_TARGET,
+            State.STRAFE_OPPOSITE: self.handle_STRAFE_OPPOSITE,
+            State.FOLLOW_MARKER_ID: self.handle_FOLLOW_MARKER_ID,
+            State.PASS_UNDER_TABLE_3: self.handle_PASS_UNDER_TABLE_3,
+            State.ROTATE_RIGHT_90: self.handle_ROTATE_RIGHT_90,
+            State.ASCEND_LOCK_4: self.handle_ASCEND_LOCK_4,
+            State.OVERBOARD_TO_FIND_5: self.handle_OVERBOARD_TO_FIND_5,
+            State.ALIGN_Y5_FLIP_LAND: self.handle_ALIGN_Y5_FLIP_LAND,
+            State.DONE: self.handle_DONE,
         }
         self.blocking_running = False
 
@@ -233,25 +245,25 @@ class DroneFSM:
 
     def send_rc(self, lr: float, fb: float, ud: float, yaw: float):
         lr, fb, ud, yaw = map(self.clip, (lr, fb, ud, yaw))
-        if(lr < 0 and lr > -8):
+        if lr < 0 and lr > -8:
             lr = -8
-        if(lr > 0 and lr < 8):
+        if lr > 0 and lr < 8:
             lr = 8
 
-        if(fb < 0 and fb > -8):
+        if fb < 0 and fb > -8:
             fb = -8
-        if(fb > 0 and fb < 8):
+        if fb > 0 and fb < 8:
             fb = 8
 
-        if(ud < 0 and ud > -8):
+        if ud < 0 and ud > -8:
             ud = -8
-        if(ud > 0 and ud < 8):
+        if ud > 0 and ud < 8:
             ud = 8
 
-        if(yaw < 0 and yaw > -8):
+        if yaw < 0 and yaw > -8:
             yaw = -8
-        if(yaw > 0 and yaw < 8):
-            yaw = 8                                    
+        if yaw > 0 and yaw < 8:
+            yaw = 8
 
         if self.ctx.simulation or not self.ctx.airborne:
             self._record_cmd(f"[SIM RC] lr:{lr} fb:{fb} ud:{ud} yaw:{yaw}")
@@ -269,10 +281,12 @@ class DroneFSM:
             self._record_cmd(f"[SIM MOVE] move_left {cm}cm")
             return
         self.ctx.drone.move_left(cm)
+
     def reset_pids(self):
         self.ctx.pid_lr.initialize()
         self.ctx.pid_ud.initialize()
         self.ctx.pid_fb.initialize()
+
     def run(self):
         print(f"[FSM] Start at {self.state.name} | SIMULATION={self.ctx.simulation}")
         while True:
@@ -299,25 +313,60 @@ class DroneFSM:
             # HUD
             y0 = 25
             if self.ctx.simulation:
-                cv2.putText(frame, "SIMULATION (no RC sent)", (10, y0),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 200, 255), 2)
+                cv2.putText(
+                    frame,
+                    "SIMULATION (no RC sent)",
+                    (10, y0),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.7,
+                    (0, 200, 255),
+                    2,
+                )
                 y0 += 25
             else:
-                cv2.putText(frame, f"AIRBORNE={self.ctx.airborne}", (10, y0),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+                cv2.putText(
+                    frame,
+                    f"AIRBORNE={self.ctx.airborne}",
+                    (10, y0),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.7,
+                    (0, 255, 255),
+                    2,
+                )
                 y0 += 25
 
             if ids is None:
-                cv2.putText(frame, "NO MARKER DETECTED", (10, y0),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
+                cv2.putText(
+                    frame,
+                    "NO MARKER DETECTED",
+                    (10, y0),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.7,
+                    (255, 0, 0),
+                    2,
+                )
             else:
-                cv2.putText(frame, "MARKER DETECTED", (10, y0),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                cv2.putText(
+                    frame,
+                    "MARKER DETECTED",
+                    (10, y0),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.7,
+                    (0, 255, 0),
+                    2,
+                )
 
             # 最近指令回饋
             if self.ctx.last_cmd_texts:
-                cv2.putText(frame, self.ctx.last_cmd_texts[-1], (10, y0 + 25),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2)
+                cv2.putText(
+                    frame,
+                    self.ctx.last_cmd_texts[-1],
+                    (10, y0 + 25),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.55,
+                    (255, 255, 255),
+                    2,
+                )
 
             # FSM
             if not self.ctx.manual_override:
@@ -332,7 +381,9 @@ class DroneFSM:
 
         cv2.destroyAllWindows()
 
-    def _pick_farther_id(self, poses: Dict[int, Tuple[np.ndarray,np.ndarray]]) -> Optional[int]:
+    def _pick_farther_id(
+        self, poses: Dict[int, Tuple[np.ndarray, np.ndarray]]
+    ) -> Optional[int]:
         # 用 z（越大越遠）；也可改 np.linalg.norm(tvec)
         best_id, best_z = None, -1
         for mid, (_, tvec) in poses.items():
@@ -341,34 +392,50 @@ class DroneFSM:
                 if z > best_z:
                     best_z, best_id = z, mid
         return best_id
-    
+
     # Handlers for each state
     def handle_ASCEND_SEARCH(self, ctx):
         frame = ctx.frame_read.frame
-        cv2.putText(frame, "ASCEND_SEARCH", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,255), 2)
+        cv2.putText(
+            frame,
+            "ASCEND_SEARCH",
+            (10, 30),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (0, 255, 255),
+            2,
+        )
 
         poses = ctx.last_poses
-        if ctx.params["ID1"] in poses and ctx.params["ID2"] in poses: # seen both
+        if ctx.params["ID1"] in poses and ctx.params["ID2"] in poses:  # seen both
             target_id = self._pick_farther_id(poses)
             non_target_id = 1 if target_id == 2 else 2
             ctx.params["TARGET_ID"] = target_id
 
             x_far = float(poses[target_id][1][0][0])
             x_near = float(poses[non_target_id][1][0][0])
-            
-            if x_far - x_near > 0: # far is right reletive to near
-                ctx.params["OPPOSITE_STRAFE_SIGN"] = -1   # strafe left 
+
+            if x_far - x_near > 0:  # far is right reletive to near
+                ctx.params["OPPOSITE_STRAFE_SIGN"] = -1  # strafe left
             else:
-                ctx.params["OPPOSITE_STRAFE_SIGN"] = +1   # strafe right 
+                ctx.params["OPPOSITE_STRAFE_SIGN"] = +1  # strafe right
             return State.CENTER_ON_TARGET
 
         # 依你的約定 ud<0 上升
         self.send_rc(0, 0, ctx.params["ASCENT_SPEED"], 0)
         return State.ASCEND_SEARCH
-    
+
     def handle_CENTER_ON_TARGET(self, ctx):
         frame = ctx.frame_read.frame
-        cv2.putText(frame, "CENTER_ON_TARGET", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,255), 2)
+        cv2.putText(
+            frame,
+            "CENTER_ON_TARGET",
+            (10, 30),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (0, 255, 255),
+            2,
+        )
 
         target_id = ctx.params["TARGET_ID"]
 
@@ -379,35 +446,53 @@ class DroneFSM:
             ud = ctx.pid_ud.update(y, 0.0)
 
             self.send_rc(lr, 0, -ud, 0)
-            #check if centered
-            if abs(x) < ctx.params["CENTER_X_TOL"] and abs(y) < ctx.params["CENTER_Y_TOL"]:
+            # check if centered
+            if (
+                abs(x) < ctx.params["CENTER_X_TOL"]
+                and abs(y) < ctx.params["CENTER_Y_TOL"]
+            ):
                 return State.FORWARD_TO_TARGET
             return State.CENTER_ON_TARGET
         except KeyError:
             self.send_rc(0, 0, 0, 0)
             return State.CENTER_ON_TARGET
 
-    
     def handle_FORWARD_TO_TARGET(self, ctx):
         frame = ctx.frame_read.frame
-        cv2.putText(frame, "FORWARD_TO_TARGET", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,255), 2)
+        cv2.putText(
+            frame,
+            "FORWARD_TO_TARGET",
+            (10, 30),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (0, 255, 255),
+            2,
+        )
 
         try:
             target_id = ctx.params["TARGET_ID"]
             _, tvec = ctx.last_poses[target_id]
             z = tvec[2][0]
-            fb = ctx.pid_fb.update(z - ctx.params["TARGET_DIST"], sleep=0.0)     
+            fb = ctx.pid_fb.update(z - ctx.params["TARGET_DIST"], sleep=0.0)
             self.send_rc(0, fb, 0, 0)
             if z < ctx.params["TARGET_DIST"] + ctx.params["Z_TOL"]:
                 return State.STRAFE_OPPOSITE
             return State.FORWARD_TO_TARGET
-        except KeyError: #can not find target, too close or lagging
+        except KeyError:  # can not find target, too close or lagging
             self.send_rc(0, 0, 0, 0)
             return State.STRAFE_OPPOSITE
-    
+
     def handle_STRAFE_OPPOSITE(self, ctx):
         frame = ctx.frame_read.frame
-        cv2.putText(frame, "STRAFE_OPPOSITE", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,255), 2)
+        cv2.putText(
+            frame,
+            "STRAFE_OPPOSITE",
+            (10, 30),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (0, 255, 255),
+            2,
+        )
         if self.strafe_t0 is None:
             self.strafe_t0 = time.time()
 
@@ -418,7 +503,6 @@ class DroneFSM:
             return State.FOLLOW_MARKER_ID
         return State.STRAFE_OPPOSITE
 
-
     def handle_FOLLOW_MARKER_ID(self, ctx: Context) -> State:
         tid = ctx.params["FOLLOW_ID"]
         marker3 = ctx.params["MARKER_3"]
@@ -427,86 +511,86 @@ class DroneFSM:
         poses = getattr(ctx, "last_poses", {}) or {}
 
         if tid not in poses and marker3 in poses:
-            self.hover()                  
+            self.hover()
             return State.PASS_UNDER_TABLE_3
 
         if tid not in poses:
-            self.hover()   
-            return State.FOLLOW_MARKER_ID  
-        
+            self.hover()
+            return State.FOLLOW_MARKER_ID
+
         rvec, tvec = poses[tid]
 
         x, y, z = tvec[0][0], tvec[1][0], tvec[2][0]
-        
+
         # Calculate marker rotation angle using rvec
         angle_error, _ = calculate_marker_angle(rvec)
         angle_error = angle_error * 4.0
-        
+
         # Calculate errors for PID tuning analysis
         error_x = x  # Left/Right error
         error_y = y  # Up/Down error
         error_z = z - target_dist  # Forward/Back error
         # print(error_z)
-        
-        
-        # Step 2: Use PID to get control outputs
-        yaw_update = ctx.pid_lr.update(error_x, sleep=0.0)     # Left/Right movement
-        ud_update = ctx.pid_ud.update(error_y, sleep=0.0)       # Up/Down movement
-        fb_update = ctx.pid_fb.update(error_z, sleep=0.0)        # Forward/Back movement
 
+        # Step 2: Use PID to get control outputs
+        yaw_update = ctx.pid_lr.update(error_x, sleep=0.0)  # Left/Right movement
+        ud_update = ctx.pid_ud.update(error_y, sleep=0.0)  # Up/Down movement
+        fb_update = ctx.pid_fb.update(error_z, sleep=0.0)  # Forward/Back movement
 
         if fb_update < 0:
-           fb_update = fb_update * 4
+            fb_update = fb_update * 4
         if ud_update > 0:
             ud_update *= 10
-        
+
         # Step 3: Apply speed limiting to prevent loss of control (建議限制最高速度防止失控)
         rot_speed = ctx.params["FOLLOW_ROT_SPE"]
         x_speed = ctx.params["FOLLOW_X_SPE"]
         y_speed = ctx.params["FOLLOW_Y_SPE"]
         z_speed = ctx.params["FOLLOW_Z_SPE"]
-                
+
         # Limit yaw (left/right) speed
         if yaw_update > x_speed:
             yaw_update = x_speed
         elif yaw_update < -x_speed:
             yaw_update = -x_speed
-        
-        # Limit up/down speed  
+
+        # Limit up/down speed
         if ud_update > y_speed:
             ud_update = y_speed
         elif ud_update < -y_speed:
             ud_update = -y_speed
-        
+
         # Limit forward/back speed
         if fb_update > z_speed:
             fb_update = z_speed
         elif fb_update < -z_speed:
             fb_update = -z_speed
-        
+
         # Add rotation control based on marker orientation with proper angle normalization
         # Target alignment angle - we want the marker to appear level in the image
         # 0° = horizontal alignment (marker appears level)
-        # Calculate shortest angle error  
+        # Calculate shortest angle error
 
-                
-        print(f"error x:{error_x}, error y:{error_y}, error z:{error_z}, error a:{angle_error}")
-        print(f'fb err{fb_update}')
-        
+        print(
+            f"error x:{error_x}, error y:{error_y}, error z:{error_z}, error a:{angle_error}"
+        )
+        print(f"fb err{fb_update}")
+
         # Dead zone - don't rotate if error is small (prevents jittering)
         angle_dead_zone = 1.0  # degrees - larger dead zone for stability
         if abs(angle_error) < angle_dead_zone:
             angle_error = 0
-        
+
         # Apply speed limiting for rotation
         if angle_error > rot_speed:
             angle_error = rot_speed
         elif angle_error < -rot_speed:
             angle_error = -rot_speed
-        
-        self.send_rc(int(yaw_update), int(fb_update), int(-ud_update), int(-angle_error))
-        return State.FOLLOW_MARKER_ID
 
+        self.send_rc(
+            int(yaw_update), int(fb_update), int(-ud_update), int(-angle_error)
+        )
+        return State.FOLLOW_MARKER_ID
 
     def handle_PASS_UNDER_TABLE_3(self, ctx: Context) -> State:
         """
@@ -519,7 +603,7 @@ class DroneFSM:
         """
         frame = ctx.frame_read.frame
         tid = ctx.params["MARKER_3"]
-        
+
         # Initialize phase tracking
         if not hasattr(self, "_pass_phase"):
             # 0=searching, 1=center&align, 2=descending, 3=moving_forward
@@ -527,10 +611,17 @@ class DroneFSM:
             self._pass_t0 = None
             self._pass_initial_height = None
             self._pass_stable = 0
-        
-        cv2.putText(frame, f"STATE: PASS_UNDER_TABLE_3 (Phase {self._pass_phase})", 
-                    (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
-        
+
+        cv2.putText(
+            frame,
+            f"STATE: PASS_UNDER_TABLE_3 (Phase {self._pass_phase})",
+            (10, 90),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (0, 255, 255),
+            2,
+        )
+
         # Phase 0: Search for MARKER_3
         if self._pass_phase == 0:
             poses = getattr(ctx, "last_poses", {}) or {}
@@ -538,10 +629,17 @@ class DroneFSM:
                 # Keep searching - gentle forward movement
                 search_ud = ctx.params.get("PASS_SEARCH_UD", 5)
                 self.send_rc(0, 0, search_ud, 0)
-                cv2.putText(frame, f"Searching for Marker {tid}...", 
-                           (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 2)
+                cv2.putText(
+                    frame,
+                    f"Searching for Marker {tid}...",
+                    (10, 120),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (255, 255, 0),
+                    2,
+                )
                 return State.PASS_UNDER_TABLE_3
-            
+
             # Marker detected! Move to centering/alignment phase
             print(f"[PASS_TABLE] Marker {tid} detected, start centering & aligning")
             self.hover()
@@ -549,7 +647,7 @@ class DroneFSM:
             self.reset_pids()
             self._pass_stable = 0
             self._pass_phase = 1  # go to centering phase
-            
+
             return State.PASS_UNDER_TABLE_3
 
         # Phase 1: Center on marker 3 (x, y, and yaw angle)
@@ -558,8 +656,15 @@ class DroneFSM:
             if tid not in poses:
                 # Lost marker during centering: hold position and keep trying
                 self.hover()
-                cv2.putText(frame, f"Lost Marker {tid} during centering...", 
-                           (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 165, 255), 2)
+                cv2.putText(
+                    frame,
+                    f"Lost Marker {tid} during centering...",
+                    (10, 120),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (0, 165, 255),
+                    2,
+                )
                 return State.PASS_UNDER_TABLE_3
 
             rvec, tvec = poses[tid]
@@ -585,24 +690,50 @@ class DroneFSM:
             yaw_cmd = angle_err  # negative to reduce error
 
             # keep distance constant here (fb=0)
-            self.send_rc(lr*2, fb*2, -ud*2, -yaw_cmd*5)
+            self.send_rc(lr * 2, fb * 2, -ud * 2, -yaw_cmd * 5)
 
             # check tolerances (x/y and angle)
             tol_x = 5
             tol_y = 10
             tol_z = 5
             tol_a = 1
-            if abs(x) <= tol_x and abs(y) <= tol_y and abs(z) <= tol_z and abs(angle_err) <= tol_a:
+            if (
+                abs(x) <= tol_x
+                and abs(y) <= tol_y
+                and abs(z) <= tol_z
+                and abs(angle_err) <= tol_a
+            ):
                 self._pass_stable += 2
-                cv2.putText(frame, f"Centered+Aligned stable {self._pass_stable}/{ctx.params['TRACK_STABLE_N']}",
-                           (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-                
+                cv2.putText(
+                    frame,
+                    f"Centered+Aligned stable {self._pass_stable}/{ctx.params['TRACK_STABLE_N']}",
+                    (10, 120),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (0, 255, 0),
+                    2,
+                )
+
             else:
                 self._pass_stable = 0
-                cv2.putText(frame, "Centering & aligning marker 3...",
-                           (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 2)
-                cv2.putText(frame, f"x={x:.1f} (tol {tol_x}), y={y:.1f} (tol {tol_y}), angle={angle_err:.1f} (tol {tol_a})",
-                           (10, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 165, 0), 2)
+                cv2.putText(
+                    frame,
+                    "Centering & aligning marker 3...",
+                    (10, 120),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (255, 255, 0),
+                    2,
+                )
+                cv2.putText(
+                    frame,
+                    f"x={x:.1f} (tol {tol_x}), y={y:.1f} (tol {tol_y}), angle={angle_err:.1f} (tol {tol_a})",
+                    (10, 150),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.45,
+                    (255, 165, 0),
+                    2,
+                )
 
             if self._pass_stable >= int(ctx.params.get("TRACK_STABLE_N", 5)):
                 print("[PASS_TABLE] Centered & aligned. Start descent")
@@ -618,14 +749,21 @@ class DroneFSM:
             DESCENT_TIME = ctx.params.get("PASS_DESCENT_TIME", 2)
             descent_ud = ctx.params.get("PASS_DESCENT_UD", -40)
             elapsed = time.time() - self._pass_t0
-            
+
             if elapsed < DESCENT_TIME:
                 # Continue descending (ud>0 = down)
                 self.send_rc(0, 0, descent_ud, 0)
-                cv2.putText(frame, f"Descending... {elapsed:.1f}s / {DESCENT_TIME}s", 
-                           (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
+                cv2.putText(
+                    frame,
+                    f"Descending... {elapsed:.1f}s / {DESCENT_TIME}s",
+                    (10, 120),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (0, 255, 255),
+                    2,
+                )
                 return State.PASS_UNDER_TABLE_3
-            
+
             # Descent complete, move to forward phase
             print("[PASS_TABLE] Descent complete, moving forward 2m")
             self.hover()
@@ -633,26 +771,33 @@ class DroneFSM:
             self._pass_t0 = time.time()
             self._pass_phase = 3
             return State.PASS_UNDER_TABLE_3
-        
+
         # Phase 3: Move forward 2m (200cm)
         if self._pass_phase == 3:
             FORWARD_TIME = ctx.params.get("PASS_FORWARD_TIME", 4.1)
             forward_fb = ctx.params.get("PASS_FORWARD_FB", 40)
             elapsed = time.time() - self._pass_t0
-            
+
             if elapsed < FORWARD_TIME:
                 # Continue moving forward
                 self.send_rc(0, forward_fb, 0, 0)
-                cv2.putText(frame, f"Moving forward... {elapsed:.1f}s / {FORWARD_TIME}s", 
-                           (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
+                cv2.putText(
+                    frame,
+                    f"Moving forward... {elapsed:.1f}s / {FORWARD_TIME}s",
+                    (10, 120),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (0, 255, 255),
+                    2,
+                )
                 return State.PASS_UNDER_TABLE_3
-            
+
             # Forward movement complete
             print("[PASS_TABLE] Passage complete, transitioning to ROTATE_RIGHT_90")
             self.hover()
             self._pass_phase = 0  # Reset for next time
             return State.ROTATE_RIGHT_90
-        
+
         # Fallback
         return State.PASS_UNDER_TABLE_3
 
@@ -664,15 +809,22 @@ class DroneFSM:
         3. Transition to ASCEND_LOCK_4
         """
         frame = ctx.frame_read.frame
-        
+
         # Initialize rotation tracking
         if not hasattr(self, "_rotate_phase"):
             self._rotate_phase = 0  # 0=init, 1=rotating, 2=complete
             self._rotate_t0 = None
-        
-        cv2.putText(frame, f"STATE: ROTATE_RIGHT_90 (Phase {self._rotate_phase})", 
-                    (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
-        
+
+        cv2.putText(
+            frame,
+            f"STATE: ROTATE_RIGHT_90 (Phase {self._rotate_phase})",
+            (10, 90),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (0, 255, 255),
+            2,
+        )
+
         # Phase 0: Initialize
         if self._rotate_phase == 0:
             print("[ROTATE_RIGHT] Starting 90° clockwise rotation")
@@ -681,29 +833,36 @@ class DroneFSM:
             self._rotate_t0 = time.time()
             self._rotate_phase = 1
             return State.ROTATE_RIGHT_90
-        
+
         # Phase 1: Rotate 90 degrees
         if self._rotate_phase == 1:
             ROTATE_DEG = ctx.params.get("ROTATE_DEG", 90)
             ROTATE_SPEED = ctx.params.get("ROTATE_SPEED", 40)  # Degrees per second
             rotate_yaw = ctx.params.get("ROTATE_YAW", 50)
             ROTATE_TIME = 3.5
-            
+
             elapsed = time.time() - self._rotate_t0
-            
+
             if elapsed < ROTATE_TIME:
                 # Continue rotating clockwise (positive yaw)
                 self.send_rc(0, 0, 0, rotate_yaw)
-                cv2.putText(frame, f"Rotating CW... {elapsed:.1f}s / {ROTATE_TIME:.1f}s", 
-                           (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
+                cv2.putText(
+                    frame,
+                    f"Rotating CW... {elapsed:.1f}s / {ROTATE_TIME:.1f}s",
+                    (10, 120),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (0, 255, 255),
+                    2,
+                )
                 return State.ROTATE_RIGHT_90
-            
+
             # Rotation complete
             print("[ROTATE_RIGHT] 90° rotation complete, moving to ASCEND_LOCK_4")
             self.hover()
             self._rotate_phase = 0  # Reset for next time
             return State.ASCEND_LOCK_4
-        
+
         # Fallback
         return State.ROTATE_RIGHT_90
 
@@ -717,35 +876,56 @@ class DroneFSM:
         """
         frame = ctx.frame_read.frame
         tid = ctx.params["MARKER_4"]
-        
+
         # Initialize tracking
         if not hasattr(self, "_ascend_stable"):
             self._ascend_stable = 0
-        
-        cv2.putText(frame, f"STATE: ASCEND_LOCK_4 (find & lock ID={tid})", 
-                    (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
-        
+
+        cv2.putText(
+            frame,
+            f"STATE: ASCEND_LOCK_4 (find & lock ID={tid})",
+            (10, 90),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (0, 255, 255),
+            2,
+        )
+
         poses = getattr(ctx, "last_poses", {}) or {}
-        
+
         if tid not in poses:
             # Marker not detected - continue ascending while searching
             self._ascend_stable = 0
             ascend_speed = ctx.params.get("ASCEND_LOCK_SPEED", 40)
             self.send_rc(0, -20, ascend_speed, 0)  # ud<0 = up
-            cv2.putText(frame, f"Ascending, searching for Marker {tid}...", 
-                       (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 2)
+            cv2.putText(
+                frame,
+                f"Ascending, searching for Marker {tid}...",
+                (10, 120),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (255, 255, 0),
+                2,
+            )
             return State.ASCEND_LOCK_4
-        
+
         # Marker detected - perform centering with PID
         rvec, tvec = poses[tid]
         x = float(tvec[0][0])
         y = float(tvec[1][0])
         z = float(tvec[2][0])
-        
+
         # Display marker position
-        cv2.putText(frame, f"Marker4: x={x:.1f} y={y:.1f} z={z:.1f}cm", 
-                   (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-        
+        cv2.putText(
+            frame,
+            f"Marker4: x={x:.1f} y={y:.1f} z={z:.1f}cm",
+            (10, 120),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            (0, 255, 0),
+            2,
+        )
+
         # PID control for centering
         err_x = x
         err_y = y
@@ -759,29 +939,47 @@ class DroneFSM:
         cap = int(ctx.params["MAX_RC"])
         lr = max(-cap, min(cap, lr))
         ud = max(-cap, min(cap, ud))
-        
+
         # Send control command (note: ud sign is flipped for camera-to-drone coordinate)
         self.send_rc(lr, fb, -ud, -marker_angle)
-        
+
         # Check if centered within tolerance
-        if (abs(err_x) <= ctx.params["CENTER_X_TOL"] and 
-            abs(err_y) <= ctx.params["CENTER_Y_TOL"] and
-            abs(err_z) <= 5):
+        if (
+            abs(err_x) <= ctx.params["CENTER_X_TOL"]
+            and abs(err_y) <= ctx.params["CENTER_Y_TOL"]
+            and abs(err_z) <= 5
+        ):
             self._ascend_stable += 2
-            cv2.putText(frame, f"Locked! Stable: {self._ascend_stable}/{ctx.params['TRACK_STABLE_N']}", 
-                       (10, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+            cv2.putText(
+                frame,
+                f"Locked! Stable: {self._ascend_stable}/{ctx.params['TRACK_STABLE_N']}",
+                (10, 150),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (0, 255, 0),
+                2,
+            )
         else:
             self._ascend_stable = 0
-            cv2.putText(frame, "Centering on marker...", 
-                       (10, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 2)
-        
+            cv2.putText(
+                frame,
+                "Centering on marker...",
+                (10, 150),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (255, 255, 0),
+                2,
+            )
+
         # Check if stable for required number of frames
         if self._ascend_stable >= ctx.params["TRACK_STABLE_N"]:
-            print(f"[ASCEND_LOCK_4] Locked on Marker {tid}, moving to OVERBOARD_TO_FIND_5")
+            print(
+                f"[ASCEND_LOCK_4] Locked on Marker {tid}, moving to OVERBOARD_TO_FIND_5"
+            )
             self.hover()
             self._ascend_stable = 0  # Reset for next time
             return State.OVERBOARD_TO_FIND_5
-        
+
         return State.ASCEND_LOCK_4
 
     def handle_OVERBOARD_TO_FIND_5(self, ctx: Context) -> State:
@@ -796,8 +994,15 @@ class DroneFSM:
         tid5 = ctx.params["MARKER_5"]
         tid4 = ctx.params["MARKER_4"]
 
-        cv2.putText(frame, f"STATE: OVERBOARD_TO_FIND_5 (ID4->up 80cm, then search ID5={tid5})", 
-                    (10, 90), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+        cv2.putText(
+            frame,
+            f"STATE: OVERBOARD_TO_FIND_5 (ID4->up 80cm, then search ID5={tid5})",
+            (10, 90),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (0, 255, 255),
+            2,
+        )
 
         poses = getattr(ctx, "last_poses", {}) or {}
 
@@ -811,8 +1016,15 @@ class DroneFSM:
             if tid4 not in poses:
                 # Wait while holding hover until MARKER_4 becomes visible
                 self.hover()
-                cv2.putText(frame, f"Waiting for Marker {tid4} to start ascend...", 
-                           (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 2)
+                cv2.putText(
+                    frame,
+                    f"Waiting for Marker {tid4} to start ascend...",
+                    (10, 120),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (255, 255, 0),
+                    2,
+                )
                 return State.OVERBOARD_TO_FIND_5
 
             ascend_ud = int(ctx.params.get("OVERBOARD_ASCEND_UD", 40))
@@ -825,12 +1037,21 @@ class DroneFSM:
             if elapsed < ascend_time:
                 # Continue ascending (ud<0 = up)
                 self.send_rc(0, 0, ascend_ud, 0)
-                cv2.putText(frame, f"Ascending ~80cm... {elapsed:.1f}s / {ascend_time:.1f}s", 
-                           (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
+                cv2.putText(
+                    frame,
+                    f"Ascending ~80cm... {elapsed:.1f}s / {ascend_time:.1f}s",
+                    (10, 120),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.5,
+                    (0, 255, 255),
+                    2,
+                )
                 return State.OVERBOARD_TO_FIND_5
             else:
                 # Ascend complete → move to left-move phase
-                print("[OVERBOARD] Ascend complete. Begin moving left to find Marker 5.")
+                print(
+                    "[OVERBOARD] Ascend complete. Begin moving left to find Marker 5."
+                )
                 self.hover()
                 time.sleep(0.2)
                 self._over_phase = 1
@@ -848,10 +1069,24 @@ class DroneFSM:
             lr_speed = int(ctx.params.get("OVERBOARD_LR", -40))  # Negative = left
             self.send_rc(lr_speed, 0, 0, 0)
 
-            cv2.putText(frame, f"Moving left, searching for Marker {tid5}...", 
-                       (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 2)
-            cv2.putText(frame, f"lr={lr_speed}", 
-                       (10, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+            cv2.putText(
+                frame,
+                f"Moving left, searching for Marker {tid5}...",
+                (10, 120),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (255, 255, 0),
+                2,
+            )
+            cv2.putText(
+                frame,
+                f"lr={lr_speed}",
+                (10, 150),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (255, 255, 255),
+                2,
+            )
             return State.OVERBOARD_TO_FIND_5
 
         return State.OVERBOARD_TO_FIND_5
@@ -863,94 +1098,91 @@ class DroneFSM:
         poses = getattr(ctx, "last_poses", {}) or {}
 
         if tid not in poses:
-            self.send_rc(0, -10, 0, 0)  # slowly move back if lost        
+            self.send_rc(0, -10, 0, 0)  # slowly move back if lost
             return State.ALIGN_Y5_FLIP_LAND
-        
+
         rvec, tvec = poses[tid]
 
         x, y, z = tvec[0][0], tvec[1][0], tvec[2][0]
-        
+
         # Calculate marker rotation angle using rvec
         marker_angle, z_prime = calculate_marker_angle(rvec)
-        
+
         # Calculate errors for PID tuning analysis
         error_x = x  # Left/Right error
-        error_y = y # Up/Down error
+        error_y = y  # Up/Down error
         error_z = z - dis  # Forward/Back error (target 80cm)
         # print(error_z)
 
-        
-        
         x_m = ctx.params["MARKER_5_X_TOL"]
         y_m = ctx.params["MARKER_5_Y_TOL"]
         z_m = ctx.params["MARKER_5_Z_TOL"]
         if abs(error_z) < z_m and abs(error_x) < x_m and abs(error_y) < y_m:
             _ascend_stable += 1
-            if(_ascend_stable == 3):
+            if _ascend_stable == 3:
                 self.hover()
                 self.ctx.drone.land()
                 return State.DONE
             else:
                 return State.ALIGN_Y5_FLIP_LAND
-        
+
         self._ascend_stable = 0
-        
-        
+
         # Step 2: Use PID to get control outputs
-        yaw_update = ctx.pid_lr.update(error_x, sleep=0.0)    # Left/Right movement
-        ud_update = ctx.pid_ud.update(error_y, sleep=0.0)       # Up/Down movement
-        fb_update = ctx.pid_fb.update(error_z, sleep=0.0)        # Forward/Back movement
-    
-        
+        yaw_update = ctx.pid_lr.update(error_x, sleep=0.0)  # Left/Right movement
+        ud_update = ctx.pid_ud.update(error_y, sleep=0.0)  # Up/Down movement
+        fb_update = ctx.pid_fb.update(error_z, sleep=0.0)  # Forward/Back movement
+
         # Step 3: Apply speed limiting to prevent loss of control (建議限制最高速度防止失控)
         rot_speed = ctx.params["FOLLOW_ROT_SPE"]
         x_speed = ctx.params["FOLLOW_X_SPE"]
         y_speed = ctx.params["FOLLOW_Y_SPE"]
         z_speed = ctx.params["FOLLOW_Z_SPE"]
-                
+
         # Limit yaw (left/right) speed
         if yaw_update > x_speed:
             yaw_update = x_speed
         elif yaw_update < -x_speed:
             yaw_update = -x_speed
-        
-        # Limit up/down speed  
+
+        # Limit up/down speed
         if ud_update > y_speed:
             ud_update = y_speed
         elif ud_update < -y_speed:
             ud_update = -y_speed
-        
+
         # Limit forward/back speed
         if fb_update > z_speed:
             fb_update = z_speed
         elif fb_update < -z_speed:
             fb_update = -z_speed
-        
+
         # Add rotation control based on marker orientation with proper angle normalization
         # Target alignment angle - we want the marker to appear level in the image
         # 0° = horizontal alignment (marker appears level)
         target_alignment_angle = 0.0
-        
-        # Calculate shortest angle error  
+
+        # Calculate shortest angle error
         angle_error = (marker_angle - target_alignment_angle) * 1.5
-        
+
         # Dead zone - don't rotate if error is small (prevents jittering)
         angle_dead_zone = 1.0  # degrees - larger dead zone for stability
         if abs(angle_error) < angle_dead_zone:
             angle_error = 0
-        
+
         # Apply speed limiting for rotation
         if angle_error > rot_speed:
             angle_error = rot_speed
         elif angle_error < -rot_speed:
             angle_error = -rot_speed
-        
-        self.send_rc(int(yaw_update), int(fb_update), int(-ud_update), int(-angle_error))
+
+        self.send_rc(
+            int(yaw_update), int(fb_update), int(-ud_update), int(-angle_error)
+        )
         return State.ALIGN_Y5_FLIP_LAND
 
     def handle_DONE(self, ctx: Context) -> State:  # move forward and land
         return State.DONE
-    
 
 
 def main():
@@ -964,7 +1196,9 @@ def main():
     pid_lr = PID(kP=0.5, kI=0.0, kD=0.0)
     pid_ud = PID(kP=0.5, kI=0.0, kD=0.0)
     pid_fb = PID(kP=0.4, kI=0.0, kD=0.0)
-    pid_lr.initialize(); pid_ud.initialize(); pid_fb.initialize()
+    pid_lr.initialize()
+    pid_ud.initialize()
+    pid_fb.initialize()
 
     detector = MarkerDetector(marker_size_cm=15, calib_path="calib_tello.xml")
 
@@ -975,25 +1209,34 @@ def main():
         pid_lr=pid_lr,
         pid_ud=pid_ud,
         pid_fb=pid_fb,
-        airborne=False,       # 地面
-        simulation=True       # ★ 模擬開啟
+        airborne=False,  # 地面
+        simulation=True,  # ★ 模擬開啟
     )
     fsm = DroneFSM(ctx)
 
     try:
-        try: drone.send_rc_control(0, 0, 0, 0)
-        except: pass
+        try:
+            drone.send_rc_control(0, 0, 0, 0)
+        except:
+            pass
         fsm.run()
     except Exception as ex:
         print(ex)
     finally:
-        try: drone.send_rc_control(0, 0, 0, 0)
-        except: pass
-        try: drone.streamoff()
-        except: pass
-        try: drone.end()
-        except: pass
+        try:
+            drone.send_rc_control(0, 0, 0, 0)
+        except:
+            pass
+        try:
+            drone.streamoff()
+        except:
+            pass
+        try:
+            drone.end()
+        except:
+            pass
         cv2.destroyAllWindows()
+
 
 if __name__ == "__main__":
     main()
