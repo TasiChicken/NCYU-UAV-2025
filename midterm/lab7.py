@@ -184,7 +184,7 @@ class Context:
             "MAX_RC": 40,
             "OPPOSITE_STRAFE_SIGN": 0,
             "STRAFE_SPEED": 25,
-            "STRAFE_TIME": 1.5,
+            "STRAFE_TIME": 2.0,
             "TARGET_DIST": 50.0,
 
             # following
