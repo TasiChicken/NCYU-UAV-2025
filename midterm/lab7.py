@@ -171,8 +171,8 @@ class Context:
     params: dict = field(
         default_factory=lambda: {
             # Centering tolerance var
-            "CENTER_X_TOL": 13.0,
-            "CENTER_Y_TOL": 20.0,
+            "CENTER_X_TOL": 5.0,
+            "CENTER_Y_TOL": 5.0,
             "Z_TOL": 5.0,
             "ANGLE_TOL": 1,
 
@@ -188,7 +188,7 @@ class Context:
             "TARGET_DIST": 50.0,
 
             # following
-            "FOLLOW_ID": 3,
+            "FOLLOW_ID": 0,
             "FOLLOW_DIS": 80.0,
             "FOLLOW_ROT_SPE": 60.0,
             "FOLLOW_X_SPE": 25.0,
@@ -402,10 +402,9 @@ class DroneFSM:
         # 用 z（越大越遠）；也可改 np.linalg.norm(tvec)
         best_id, best_z = None, -1
         for mid, (_, tvec) in poses.items():
-            if mid in self.ids_candidates:
-                z = float(tvec[2][0])
-                if z > best_z:
-                    best_z, best_id = z, mid
+            z = float(tvec[2][0])
+            if z > best_z:
+                best_z, best_id = z, mid
         return best_id
 
     # Handlers for each state
@@ -422,7 +421,7 @@ class DroneFSM:
         )
 
         poses = ctx.last_poses
-        if ctx.params["ID1"] in poses and ctx.params["ID2"] in poses:  # seen both
+        if ctx.params["ID1"] in poses and ctx.params["ID2"] in poses and len(poses) == 2:  # seen both
             target_id = self._pick_farther_id(poses)
             non_target_id = 1 if target_id == 2 else 2
             ctx.params["TARGET_ID"] = target_id
