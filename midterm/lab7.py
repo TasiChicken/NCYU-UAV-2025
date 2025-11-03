@@ -587,7 +587,7 @@ class DroneFSM:
         # Calculate shortest angle error
 
         print(
-            f"error x:{error_x}, error y:{error_y}, error z:{error_z}, error a:{angle_error}"
+            f"error x:{error_x}, error y:{error_y}, error z:{error_z}, error a:{angle_error}"   
         )
         print(f"fb err{fb_update}")
 
@@ -680,6 +680,7 @@ class DroneFSM:
                     0.5,
                     (0, 165, 255),
                     2,
+                    self.send_rc(0, -15, 0, 0)
                 )
                 return State.PASS_UNDER_TABLE_3
 
@@ -706,7 +707,7 @@ class DroneFSM:
             yaw_cmd = angle_err  # negative to reduce error
 
             # keep distance constant here (fb=0)
-            self.send_rc(lr * 2, fb * 2, -ud * 2, -yaw_cmd * 5)
+            self.send_rc(lr, fb, -ud, -yaw_cmd)
 
             # check tolerances (x/y and angle)
             if (
