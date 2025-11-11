@@ -15,7 +15,7 @@ DEFAULT_FACE_H_MM    = 200.0
 DEFAULT_FACE_BS      = 0.90
 
 DEFAULT_PERSON_W_MM  = 500.0
-DEFAULT_PERSON_H_MM  = 1700.0
+DEFAULT_PERSON_H_MM  = 1800.0
 DEFAULT_PERSON_BS    = 0.90
 
 DEFAULT_CASCADE_PATH = "./haarcascade_frontalface_default.xml"
@@ -163,7 +163,7 @@ def main():
                 continue
             rvec, tvec, z_m, d_m = pose
             cv2.rectangle(frame, (x,y), (x+w,y+h), (0,255,0), 2)
-            cv2.putText(frame, f"face#{i+1} Z={z_m:.2f}m |t|={d_m:.2f}m",
+            cv2.putText(frame, f"face#{i+1} {d_m:.2f}m",
                         (x, max(0, y-8)), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0,255,0), 2)
             if args.draw_axes:
                 draw_axes(frame, K, dist, rvec, tvec, axis_len=90.0)
@@ -182,7 +182,7 @@ def main():
                 continue
             rvec, tvec, z_m, d_m = pose
             cv2.rectangle(frame, (x,y), (x+w,y+h), (0,165,255), 2)
-            cv2.putText(frame, f"person#{j+1} Z={z_m:.2f}m |t|={d_m:.2f}m",
+            cv2.putText(frame, f"person#{j+1} {d_m:.2f}m",
                         (x, min(H-5, y+h+18)), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0,165,255), 2)
             if args.draw_axes:
                 draw_axes(frame, K, dist, rvec, tvec, axis_len=140.0)
