@@ -5,16 +5,15 @@ import sys
 import os
 from typing import List, Tuple
 
-# ===== 預設參數（針對 640x480 解析度換算過的內參） =====
 DEFAULT_WEBCAM_INDEX = 0
 DEFAULT_INTRINSIC    = (500.0, 666.67, 320.0, 240.0)  # fx fy cx cy for 640x480
 DEFAULT_DISTORTION   = (0.0, 0.0, 0.0, 0.0, 0.0)
 
-DEFAULT_FACE_W_MM    = 160.0
+DEFAULT_FACE_W_MM    = 180.0
 DEFAULT_FACE_H_MM    = 200.0
 DEFAULT_FACE_BS      = 0.90
 
-DEFAULT_PERSON_W_MM  = 500.0
+DEFAULT_PERSON_W_MM  = 600.0
 DEFAULT_PERSON_H_MM  = 1800.0
 DEFAULT_PERSON_BS    = 0.90
 
