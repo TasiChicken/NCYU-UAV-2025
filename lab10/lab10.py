@@ -54,20 +54,21 @@ class MarkerDetector:
                     self.distortion_coefficients,
                 )
                 if success:
-                    # 多存 corners 方便算中心點
-                    poses[int(mid)] = (rvec, tvec, corners[i])
+                    poses[int(mid)] = (rvec, tvec)
         return ids, poses
 
 drone = None
 detector = None
 frame_read = None
 
+last_send = np.array([100, 0, 0, 0])
 def send_rc(lr: float, fb: float, ud: float, yaw: float):
     global drone
+    global last_send
 
     def norm(v: float) -> float:
         if v == 0:
-            return 0.0
+            return 0
         av = abs(v)
         if av < MIN_RC:
             return MIN_RC if v > 0 else -MIN_RC
@@ -77,14 +78,13 @@ def send_rc(lr: float, fb: float, ud: float, yaw: float):
             return v
 
     lr, fb, ud, yaw = map(norm, (lr, fb, ud, yaw))
-    drone.send_rc_control(int(lr), int(fb), int(ud), int(yaw))
 
-def get_marker_center(corners):
-    # corners shape: (1,4,2)
-    pts = corners[0]
-    cx = int(np.mean(pts[:, 0]))
-    cy = int(np.mean(pts[:, 1]))
-    return cx, cy
+    curr = np.array([lr, fb, ud, yaw])
+    diffs = np.abs(curr - last_send)
+    l1 = np.sum(diffs)
+    if (l1 >= 5):
+        last_send = curr
+        drone.send_rc_control(int(lr), int(fb), int(ud), int(yaw))
 
 def line_follow_control(frame, pid_lr, forward_speed=20):
     """
@@ -160,7 +160,6 @@ def handle_takeoff_search(frame,
 def handle_align_start(frame,
                        marker_visible: bool,
                        ids, poses,
-                       center_x: int, center_y: int,
                        pid_lr_marker, pid_ud_marker, pid_fb_marker,
                        pid_lr_line,
                        desired_dist_cm: float,
@@ -174,18 +173,19 @@ def handle_align_start(frame,
         return FlightState.TAKEOFF_SEARCH, marker_visible_prev
 
     mid = int(ids.flatten()[0])
-    rvec, tvec, corners = poses[mid]
-    cx, cy = get_marker_center(corners)
+    print(mid)
+    print(poses)
+    print(poses[mid])
+    _, tvec = poses[mid]
+    x, y, z = tvec[0][0], tvec[1][0], tvec[2][0]
 
-    dist_z = float(tvec[2])
+    err_x = x  # Left/Right error
+    err_y = y  # Up/Down error
+    err_z = z - desired_dist_cm  # Forward/Back error
 
-    err_x = cx - center_x
-    err_y = cy - center_y
-    err_z = dist_z - desired_dist_cm
-
-    lr_cmd = -pid_lr_marker.update(err_x, sleep=0)
-    ud_cmd = -pid_ud_marker.update(err_y, sleep=0)
-    fb_cmd = -pid_fb_marker.update(err_z, sleep=0)
+    lr_cmd = pid_lr_marker.update(err_x, sleep=0)
+    ud_cmd = pid_ud_marker.update(err_y, sleep=0)
+    fb_cmd = pid_fb_marker.update(err_z, sleep=0)
 
     send_rc(lr_cmd, fb_cmd, ud_cmd, 0)
 
@@ -243,18 +243,19 @@ def handle_align_end_land(frame,
         send_rc(0, 0, 0, 0)
         return FlightState.ALIGN_END_LAND, False
 
-    mid = int(ids.flatten()[0])
-    rvec, tvec, corners = poses[mid]
-    cx, cy = get_marker_center(corners)
-    dist_z = float(tvec[2])
+    mid = 1
+    rvec, tvec = poses[mid]
+    x, y, z = tvec[0][0], tvec[1][0], tvec[2][0]
 
-    err_x = cx - center_x
-    err_y = cy - center_y
-    err_z = dist_z - desired_dist_cm
+    target_dist = 60
 
-    lr_cmd = -pid_lr_marker.update(err_x, sleep=0)
-    ud_cmd = -pid_ud_marker.update(err_y, sleep=0)
-    fb_cmd = -pid_fb_marker.update(err_z, sleep=0)
+    err_x = x  # Left/Right error
+    err_y = y  # Up/Down error
+    err_z = z - target_dist  # Forward/Back error
+
+    lr_cmd = pid_lr_marker.update(err_x, sleep=0)
+    ud_cmd = pid_ud_marker.update(err_y, sleep=0)
+    fb_cmd = pid_fb_marker.update(err_z, sleep=0)
 
     send_rc(lr_cmd, fb_cmd, ud_cmd, 0)
 
@@ -274,26 +275,27 @@ def handle_align_end_land(frame,
 def loop(pid_lr_marker, pid_ud_marker, pid_fb_marker, pid_lr_line):
     global drone, detector, frame_read
 
-    state = FlightState.TAKEOFF_SEARCH
+    state = FlightState.IDLE
     marker_visible_prev = False
     desired_dist_cm = 60.0
 
     while True:
+        frame = frame_read.frame
+
+        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
         key = cv2.waitKey(1)
         if key == ord("1"):
             drone.takeoff()
             time.sleep(1.0)
             print("[KEY] takeoff")
-            state = FlightState.IDLE
+            state = FlightState.TAKEOFF_SEARCH
+            continue
         elif key == ord("2"):
             drone.land()
             print("[KEY] land")
-            return
-        
-
-        frame = frame_read.frame
-        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            return        
 
         h, w, _ = frame.shape
         center_x = w // 2
@@ -304,6 +306,7 @@ def loop(pid_lr_marker, pid_ud_marker, pid_fb_marker, pid_lr_line):
 
         cv2.line(frame, (center_x, 0), (center_x, h), (255, 0, 0), 1)
         cv2.line(frame, (0, center_y), (w, center_y), (255, 0, 0), 1)
+        cv2.imshow("frame", frame)
 
         if state == FlightState.IDLE:
             continue
@@ -315,7 +318,6 @@ def loop(pid_lr_marker, pid_ud_marker, pid_fb_marker, pid_lr_line):
         elif state == FlightState.ALIGN_START:
             state, marker_visible_prev = handle_align_start(
                 frame, marker_visible, ids, poses,
-                center_x, center_y,
                 pid_lr_marker, pid_ud_marker, pid_fb_marker,
                 pid_lr_line,
                 desired_dist_cm,
@@ -354,9 +356,6 @@ def main():
     time.sleep(2.0)
     frame_read = drone.get_frame_read()
 
-    drone.takeoff()
-    time.sleep(2.0)
-
     pid_lr_marker = PID(kP=0.5, kI=0.0, kD=0.0)
     pid_ud_marker = PID(kP=0.5, kI=0.0, kD=0.0)
     pid_fb_marker = PID(kP=0.4, kI=0.0, kD=0.0)
@@ -367,6 +366,14 @@ def main():
     pid_fb_marker.initialize()
     pid_lr_line.initialize()
 
+    send_rc(0, 0, 0, 0)
+    loop(pid_lr_marker, pid_ud_marker, pid_fb_marker, pid_lr_line)
+
+    send_rc(0, 0, 0, 0)
+    drone.streamoff()
+    drone.end()
+    cv2.destroyAllWindows()
+"""
     try:
         send_rc(0, 0, 0, 0)
         loop(pid_lr_marker, pid_ud_marker, pid_fb_marker, pid_lr_line)
@@ -380,6 +387,7 @@ def main():
             cv2.destroyAllWindows()
         except Exception as ex:
             print(ex)
+"""    
 
 if __name__ == "__main__":
     main()
