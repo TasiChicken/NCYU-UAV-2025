@@ -46,9 +46,9 @@ def calibration(frame_read):
     ret, camera_mat, dist_coeff, rvecs, tvecs = cv2.calibrateCamera(obj_pts, img_pts, frame.shape, None, None)
 
     # Save parameters
-    f = cv2.FileStorage("calibrate.xml", cv2.FILE_STORAGE_WRITE)
-    f.write("intrinsic", camera_mat)
-    f.write("distortion", dist_coeff)
+    f = cv2.FileStorage("calib_tello.xml", cv2.FILE_STORAGE_WRITE)
+    f.write("K", camera_mat)
+    f.write("D", dist_coeff)
     f.release()
 
 if __name__ == "__main__":
