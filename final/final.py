@@ -106,7 +106,7 @@ def trace_line(drone, speed_output, target_square, horizontal_trace=False, targe
         _, gray = cv2.threshold(gray, black_thres, 255, cv2.THRESH_BINARY)
 
         detected_squares, black_ratio = line_follower(gray)
-        print(black_ratio)
+        #print(black_ratio)
         frame = put_detected_square(frame, detected_squares, True)
         frame = cv2.putText(frame, text=f'{target_corner}', org=(width//2, 60), fontFace=cv2.FONT_HERSHEY_SIMPLEX, fontScale=2, color=(0, 255, 0), thickness=2)
         cv2.imshow("drone", frame)
@@ -137,18 +137,18 @@ def trace_line(drone, speed_output, target_square, horizontal_trace=False, targe
         else:
             lr, fb, ud, rot = speed_output
             if horizontal_trace and detected_squares[:3] == [1,1,1]:
-                ud += 10
+                ud += 3
             elif horizontal_trace and  detected_squares[-3:] == [1,1,1]:
-                ud -= 7
+                ud -= 3
             elif not horizontal_trace and detected_squares[::3] == [1,1,1]:
-                lr -= 7
+                lr -= 3
             elif not horizontal_trace and detected_squares[2::3] == [1,1,1]:
-                lr += 7
+                lr += 3
 
             if detected_squares == [0,0,0,0,0,0,0,0,0]:
                 fb -= 10
             else:
-                fb += int(mss((0.4 - black_ratio) * 60, 10)) 
+                fb += int(mss((0.3 - black_ratio) * 60, 10)) 
             drone.send_rc_control(lr, fb, ud, rot)
     drone.send_rc_control(0,0,0,0)
 
@@ -170,10 +170,10 @@ def see(drone, markId):
     intrinsic = fs.getNode("K").mat()
     distortion = fs.getNode("D").mat()
 
-    z_pid = PID(kP=0.7, kI=0.0001, kD=0.1)
-    y_pid = PID(kP=0.7, kI=0.0001, kD=0.1)
-    x_pid = PID(kP=0.7, kI=0.0001, kD=0.1)
-    yaw_pid = PID(kP=0.7, kI=0.0001, kD=0.1)
+    z_pid = PID(kP=0.5, kI=0.0001, kD=0.1)
+    y_pid = PID(kP=0.5, kI=0.0001, kD=0.1)
+    x_pid = PID(kP=0.5, kI=0.0001, kD=0.1)
+    yaw_pid = PID(kP=0.5, kI=0.0001, kD=0.1)
 
     z_pid.initialize()
     y_pid.initialize()
@@ -202,7 +202,7 @@ def see(drone, markId):
 
             rvec, tvec, _objPoints = cv2.aruco.estimatePoseSingleMarkers(markerCorners, 15, intrinsic, distortion)
             (x_err, y_err, z_err) = tvec[target_idx][0]
-            z_err = z_err - 30
+            z_err = z_err - 50
             x_err = x_err * 2
             y_err = - (y_err + 10) * 2
 
@@ -247,10 +247,10 @@ def see_multi(drone, markId):
     intrinsic = fs.getNode("K").mat()
     distortion = fs.getNode("D").mat()
 
-    z_pid = PID(kP=0.7, kI=0.0001, kD=0.1)
-    y_pid = PID(kP=0.7, kI=0.0001, kD=0.1)
-    x_pid = PID(kP=0.7, kI=0.0001, kD=0.1)
-    yaw_pid = PID(kP=0.7, kI=0.0001, kD=0.1)
+    z_pid = PID(kP=0.5, kI=0.0001, kD=0.1)
+    y_pid = PID(kP=0.5, kI=0.0001, kD=0.1)
+    x_pid = PID(kP=0.5, kI=0.0001, kD=0.1)
+    yaw_pid = PID(kP=0.5, kI=0.0001, kD=0.1)
 
     z_pid.initialize()
     y_pid.initialize()
@@ -531,60 +531,69 @@ def main():
     detected_doll = detect_objects(drone)
     print(f"Saw {detect_objects}\n")
     see(drone, 1)
+    drone.move("left", 10)
     if detected_doll == "Kanahei":
 
         drone.move("left", 100)
 
+        print("Move left!")
+        trace_line(drone, [-8,0,0,0], [0,1,0,1,1,1,0,0,0], horizontal_trace=True, target_corner=0)
+        print("0 corner")
+
         print("Move up!")
-        trace_line(drone, [0,0,15,0], [0,0,0,1,1,0,0,1,0], horizontal_trace=False, target_corner=1)
+        sleep(1)
+        trace_line(drone, [0,0,8,0], [0,0,0,1,1,0,0,1,0], horizontal_trace=False, target_corner=1)
         print("1 corner")
 
         print("Move left!")
-        trace_line(drone, [-15,0,0,0], [0,0,0,0,1,1,0,1,2], horizontal_trace=True, target_corner=2)
+        sleep(1)
+        trace_line(drone, [-8,0,0,0], [0,0,0,0,1,1,0,1,2], horizontal_trace=True, target_corner=2)
         print("2 corner")
 
         print("Move down!")
-        trace_line(drone, (0,0,-17,0), [0,1,0,1,1,0,0,0,0], horizontal_trace=False, target_corner=3)
+        sleep(1)
+
+        trace_line(drone, [0,0,-8,0], [0,1,0,1,1,0,0,0,0], horizontal_trace=False, target_corner=3)
         print("3 corner")
 
         print("Moving left!")
-        trace_line(drone, [-17,0,0,0],  [0,0,0,0,1,1,0,1,2], horizontal_trace=True, target_corner=4)
+        trace_line(drone, [-8,0,0,0],  [0,0,0,0,1,1,0,1,2], horizontal_trace=True, target_corner=4)
         print("4 corner")
 
         print("Move down!")
-        trace_line(drone, [0,0,20,0], [0,1,0,1,1,0,0,0,0], horizontal_trace=False, target_corner=5)
+        trace_line(drone, [0,0,8,0], [0,1,0,1,1,0,0,0,0], horizontal_trace=False, target_corner=5)
         print("5 corner")
 
         print("Move left!")
-        trace_line(drone, [-15,0,0,0], [0,1,0,1,1,1,2,0,2], horizontal_trace=True, target_corner=6)
+        trace_line(drone, [-8,0,0,0], [0,1,0,1,1,1,2,0,2], horizontal_trace=True, target_corner=6)
 
     else:
         print("Moving left!")
-        trace_line(drone, [-15,0,0,0], [0,1,0,1,1,1,0,0,0], horizontal_trace=True, target_corner=2)
+        trace_line(drone, [-8,0,0,0], [2,1,2,1,1,1,2,0,2], horizontal_trace=True, target_corner=2)
         print("1 corner detected")
 
         print("Moving up!")
-        trace_line(drone, (0,0,16,0), [0,0,0,1,1,0,0,1,0], horizontal_trace=False, target_corner=3)
+        trace_line(drone, [0,0,8,0], [2,2,2,1,1,2,2,1,2], horizontal_trace=False, target_corner=3)
         print("2 corner detected")
 
         print("Moving left!")
-        trace_line(drone, (-15,0,0,0), [0,0,0,0,1,1,0,1,2], horizontal_trace=True, target_corner=4)
+        trace_line(drone, (-8,0,0,0), [0,1,0,0,1,1,0,0,2], horizontal_trace=True, target_corner=4)
         print("3 corner detected")
 
         print("Moving up!")
-        trace_line(drone, (0,0,16,0), [0,0,0,1,1,0,0,1,0], horizontal_trace=False, target_corner=5)
+        trace_line(drone, [0,0,8,0], [2,2,2,1,1,2,2,1,2], horizontal_trace=False, target_corner=5)
         print("4 corner detected")
 
         print("Moving left!")
-        trace_line(drone, (-15,0,0,0), [0,0,0,1,1,1,0,1,0], horizontal_trace=True, target_corner=6)
+        trace_line(drone, (-8,0,0,0), [0,0,0,1,1,1,0,1,0], horizontal_trace=True, target_corner=6)
         print("5 corner detected")
 
         print("Moving down!")
-        trace_line(drone, [0,0,-17,0], [0,1,0,1,1,1,0,0,0], horizontal_trace=False, target_corner=7)
+        trace_line(drone, [0,0,8,0], [0,1,0,1,1,1,0,0,0], horizontal_trace=False, target_corner=7)
         print("6 corner detected")
 
         print("Moving left!")
-        trace_line(drone, [-15,0,0,0], [0,1,0,1,1,1,2,0,2], horizontal_trace=True, target_corner=6)
+        trace_line(drone, [-8,0,0,0], [0,1,0,1,1,1,2,0,2], horizontal_trace=True, target_corner=6)
 
     # TODO part3 and part4
     # 結束循線，判斷娃娃決定路徑，準備降落
