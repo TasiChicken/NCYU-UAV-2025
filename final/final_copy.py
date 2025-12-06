@@ -240,7 +240,7 @@ def see(drone, markId):
             drone.send_rc_control(0, 0, 0, 0)
 
 # See the multiple markers with the same markId (using x coor to compare), follow the nearest one 
-def see_multi(drone, markId):
+def see_multi(drone, markId, z_dist=60):
     frame_read = drone.get_frame_read()
     # cap = cv2.VideoCapture(0)
 
@@ -300,7 +300,7 @@ def see_multi(drone, markId):
             frame = cv2.aruco.drawAxis(frame, intrinsic, distortion, rvec[target_idx], tvec[target_idx], 7)
 
             (x_err, y_err, z_err) = tvec[target_idx][0]
-            z_err = z_err - 60
+            z_err = z_err - z_dist
             x_err = x_err * 2
             y_err = - (y_err + 10) * 2
 
@@ -450,6 +450,79 @@ def main():
 
         
     # TODO part3 and part4
+     #rotate 180 degree
+     #find human face and pass the table from below
+
+     #rotate 90 degree
+     #tell the doll and decide the marker to center
+     #center on the marker and land
+
+     # ------------------------------------------------------
+    # Part 3: 看到 Marker 2 -> 轉身 180 -> 看人臉 -> 過桌子
+    # ------------------------------------------------------
+    print("--- Starting Part 3 ---")
+    
+    # 1. 確保先對準 Marker 2，作為轉身的基準點
+    # 稍微後退一點避免太貼牆，好讓鏡頭看得到 marker
+    drone.move("back", 20) 
+    see(drone, 2)
+    
+    # 2. 旋轉 180 度面向桌子
+    print("Rotating 180...")
+    drone.rotate_clockwise(180)
+    time.sleep(1) # 等待機身穩定
+
+    # 3. 對準人臉 (假設 see_face 會調整無人機位置對齊人臉)
+    print("Aligning with Face...")
+    see_face(drone, face_cascade)
+    
+    # 4. 往下降並穿越桌子
+    # 假設人臉在桌子上，無人機需要下降夠多才能鑽過去 (例如下降 60-80cm)
+    print("Going under the table...")
+    drone.move("down", 60) 
+    # 穿越桌子的距離 (根據地圖桌寬 + 緩衝，約 150-200cm)
+    drone.move("forward", 180) 
+
+    # ------------------------------------------------------
+    # Part 4: 轉身 90 -> 辨識娃娃 -> 左右分流 -> 對準 Marker 3 降落
+    # ------------------------------------------------------
+    print("--- Starting Part 4 ---")
+
+    # 1. 穿過桌子後，根據地圖路線需左轉 90 度 (面向終點區)
+    print("Rotating 90 CCW...")
+    drone.rotate_counter_clockwise(90)
+    time.sleep(1)
+
+    # 2. 辨識娃娃
+    print("Detecting Doll...")
+    # 稍微上升一點或前進一點以利辨識 (視鏡頭角度而定，如果太低可能要 move up)
+    drone.move("up", 20) 
+    target_doll = detect_objects(drone)
+    print(f"Decision: Doll is {target_doll}")
+
+    # 3. 根據娃娃決定左右分流 (假設 Kanahei 往左側桌子，其他往右側桌子)
+    if target_doll == "Kanahei":
+        print("Go Left path")
+        drone.move("left", 60)
+    else:
+        print("Go Right path")
+        drone.move("right", 60)
+
+    # 4. 前進接近降落區
+    print("Approaching Landing Zone...")
+    drone.move("forward", 100)
+
+    # 5. 搜尋並對準 Marker 3 (使用 see_multi 會找最近的那個 ID 3)
+    print("Aligning with Marker 3...")
+    see_multi(drone, 3)
+
+    # 6. 降落
+    print("Landing...")
+    drone.land()
+
+
+
+
     # 結束循線，判斷娃娃決定路徑，準備降落
     drone.move("back", 30)
     see(drone, 2)
@@ -462,7 +535,7 @@ def main():
         drone.move("right", 50)
     drone.move("up", 30)
     drone.move("forward", 230)
-    see_multi(drone, 3)
+    see_multi(drone, 3, 50)
     drone.land()
     
 if __name__ == "__main__":

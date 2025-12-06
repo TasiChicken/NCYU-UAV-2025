@@ -7,14 +7,14 @@ me = tello.Tello()
 me.connect()
 print(me.get_battery())
 me.streamon()
-#me.takeoff()
+me.takeoff()
 
 cap = cv2.VideoCapture(1)
 
 # HSV Values for BLACK line
 # Black is low Value. Hue and Saturation don't matter as much, but usually low Saturation too.
 # Adjust these if the black line isn't detected well.
-hsvVals = [0, 0, 0, 179, 255, 60] 
+hsvVals = [0, 0, 0, 179, 255, 255] 
 
 sensors = 3
 threshold = 0.2
@@ -84,8 +84,8 @@ def findArucoMarkers(img, markerSize=4, totalMarkers=50, draw=True):
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     # Use 4x4 dictionary by default, common for Tello
     key = getattr(aruco, f'DICT_{markerSize}X{markerSize}_{totalMarkers}')
-    arucoDict = aruco.Dictionary_get(key)
-    arucoParam = aruco.DetectorParameters_create()
+    arucoDict = aruco.getPredefinedDictionary(aruco.DICT_4X4_50)
+    arucoParam = aruco.DetectorParameters()
     bboxs, ids, rejected = aruco.detectMarkers(gray, arucoDict, parameters=arucoParam)
     
     found_id_1 = False
@@ -100,7 +100,7 @@ while True:
     #_, img = cap.read()
     img = me.get_frame_read().frame
     img = cv2.resize(img, (width, height))
-    img = cv2.flip(img, 0)
+    # img = cv2.flip(img, 0)
 
     imgThres = thresholding(img)
     cx, line_found = getContours(imgThres, img)  ## For Translation
@@ -113,8 +113,8 @@ while True:
             print("ArUco ID 1 Found! Switching to MOVE_RIGHT")
             state = 1
         else:
-            # Hover while searching
-            me.send_rc_control(0, 0, 0, 0)
+            # asscend slowly
+            me.send_rc_control(0, 10, 0, 0)
             
     elif state == 1: # MOVE_RIGHT
         print("State: MOVE_RIGHT - Flying right, looking for line")
