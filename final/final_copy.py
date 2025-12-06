@@ -514,28 +514,10 @@ def main():
 
     # 5. 搜尋並對準 Marker 3 (使用 see_multi 會找最近的那個 ID 3)
     print("Aligning with Marker 3...")
-    see_multi(drone, 3)
+    see_multi(drone, 3, 50)
 
     # 6. 降落
     print("Landing...")
-    drone.land()
-
-
-
-
-    # 結束循線，判斷娃娃決定路徑，準備降落
-    drone.move("back", 30)
-    see(drone, 2)
-    drone.rotate_clockwise(180)
-    drone.move("down", 30)
-    detected_doll = detect_objects(drone)
-    if detected_doll == "Kanahei":
-        drone.move("left", 50)
-    else:
-        drone.move("right", 50)
-    drone.move("up", 30)
-    drone.move("forward", 230)
-    see_multi(drone, 3, 50)
     drone.land()
     
 if __name__ == "__main__":
