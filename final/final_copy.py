@@ -137,18 +137,18 @@ def trace_line(drone, speed_output, target_square, horizontal_trace=False, targe
         else:
             lr, fb, ud, rot = speed_output
             if horizontal_trace and detected_squares[:3] == [1,1,1]:
-                ud += 3
+                ud += 0
             elif horizontal_trace and  detected_squares[-3:] == [1,1,1]:
-                ud -= 3
+                ud -= 0
             elif not horizontal_trace and detected_squares[::3] == [1,1,1]:
-                lr -= 3
+                lr -= 0
             elif not horizontal_trace and detected_squares[2::3] == [1,1,1]:
-                lr += 3
+                lr += 0
 
             if detected_squares == [0,0,0,0,0,0,0,0,0]:
                 fb -= 10
-            else:
-                fb += int(mss((0.3 - black_ratio) * 60, 10)) 
+            #else:
+                #fb += int(mss((0.3 - black_ratio) * 60, 10)) 
             drone.send_rc_control(lr, fb, ud, rot)
     drone.send_rc_control(0,0,0,0)
 
@@ -160,6 +160,18 @@ def mss(update, max_speed_threshold=30):
 
     return update
 
+def init_pids(kP=0.5, kI=0.0001, kD=0.1):
+    z_pid = PID(kP=kP, kI=kI, kD=kD)
+    y_pid = PID(kP=kP, kI=kI, kD=kD)
+    x_pid = PID(kP=kP, kI=kI, kD=kD)
+    yaw_pid = PID(kP=kP, kI=kI, kD=kD)
+
+    z_pid.initialize()
+    y_pid.initialize()
+    x_pid.initialize()
+    yaw_pid.initialize()
+    return z_pid, y_pid, x_pid, yaw_pid
+
 def see(drone, markId):
     frame_read = drone.get_frame_read()
 
@@ -170,15 +182,7 @@ def see(drone, markId):
     intrinsic = fs.getNode("K").mat()
     distortion = fs.getNode("D").mat()
 
-    z_pid = PID(kP=0.5, kI=0.0001, kD=0.1)
-    y_pid = PID(kP=0.5, kI=0.0001, kD=0.1)
-    x_pid = PID(kP=0.5, kI=0.0001, kD=0.1)
-    yaw_pid = PID(kP=0.5, kI=0.0001, kD=0.1)
-
-    z_pid.initialize()
-    y_pid.initialize()
-    x_pid.initialize()
-    yaw_pid.initialize()
+    z_pid, y_pid, x_pid, yaw_pid = init_pids()
 
     while True:
         frame = frame_read.frame
@@ -247,15 +251,7 @@ def see_multi(drone, markId):
     intrinsic = fs.getNode("K").mat()
     distortion = fs.getNode("D").mat()
 
-    z_pid = PID(kP=0.5, kI=0.0001, kD=0.1)
-    y_pid = PID(kP=0.5, kI=0.0001, kD=0.1)
-    x_pid = PID(kP=0.5, kI=0.0001, kD=0.1)
-    yaw_pid = PID(kP=0.5, kI=0.0001, kD=0.1)
-
-    z_pid.initialize()
-    y_pid.initialize()
-    x_pid.initialize()
-    yaw_pid.initialize()
+    z_pid, y_pid, x_pid, yaw_pid = init_pids()
 
     while True:
         frame = frame_read.frame
@@ -373,147 +369,14 @@ def test(drone):
     see(drone, 3)
     drone.land()
 
-def has_marker():
-    frame_read = drone.get_frame_read()
-    dictionary = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
-    frame = frame_read.frame
-    markerCorners, markerIds, rejectedCandidates = cv2.aruco.detectMarkers(frame, dictionary, parameters=parameters)
-    print(markerIds)
-    return markerIds is not None
-
-FRAME_DIVIDER = 5.05
-THRESHOLD_COUNT = 200
-def check_corner(frame, f2_h, f2_w):
-    en_up, en_down, en_left, en_right = False,False,False,False
-    
-    count_blue = 0
-    for x in range(f2_w-1,f2_w-int(f2_w/FRAME_DIVIDER)-1,-1):
-        for y in range(f2_h):
-            if (frame[y,x]==255):
-                count_blue+=1
-        if count_blue>=THRESHOLD_COUNT:
-            en_right = True
-            break
-
-    count_blue = 0
-    for x in range(0,int(f2_w/FRAME_DIVIDER)):
-        for y in range(f2_h):
-            if (frame[y,x]==255):
-                count_blue+=1
-        if count_blue>=THRESHOLD_COUNT:
-            en_left = True
-            break
-
-    count_blue = 0
-
-    for y in range(0,int(f2_h/FRAME_DIVIDER)):
-        for x in range(f2_w):
-            if (frame[y,x]==255):
-                count_blue+=1
-        if count_blue>=THRESHOLD_COUNT:
-            en_up = True
-            break
-
-    count_blue = 0
-    for y in range(f2_h-int(f2_h/FRAME_DIVIDER)-1,f2_h):
-        for x in range(f2_w):
-            if (frame[y,x]==255):
-                count_blue+=1
-        if count_blue>=500:
-            en_down = True
-            break
-    return en_up, en_down, en_left, en_right
-
-MIN_RC = 5
-MAX_RC = 50
-last_send = np.array([100, 0, 0, 0])
-def send_rc(lr: float, fb: float, ud: float, yaw: float):
-    global drone
-    global last_send
-
-    def norm(v: float) -> float:
-        if v == 0:
-            return 0
-        av = abs(v)
-        if av < MIN_RC:
-            return MIN_RC if v > 0 else -MIN_RC
-        elif av > MAX_RC:
-            return MAX_RC if v > 0 else -MAX_RC
-        else:
-            return v
-
-    lr, fb, ud, yaw = map(norm, (lr, fb, ud, yaw))
-
-    curr = np.array([lr, fb, ud, yaw])
-    diffs = np.abs(curr - last_send)
-    l1 = np.sum(diffs)
-    if (l1 >= 5):
-        last_send = curr
-        drone.send_rc_control(int(lr), int(fb), int(ud), int(yaw))
-
-STATE_NOT_UP = 1
-STATE_UP = 2
-STATE_DR = 3
-def try_follow():   
-    global drone    
-    drone.move("up", 20)
-
-    detected_doll = detect_objects(drone)
-    print(f"Saw {detect_objects}\n")
-    see(drone, 1)
-
-    state = STATE_UP
-    if detected_doll == "Melody":
-        drone.move("left", 100)
-
-        while True:
-            frame = drone.get_frame_read().frame
-            (height, width, _) = frame.shape
-            f2_h, f2_w = int(height/3), int(width/3)
-            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            gray = cv2.GaussianBlur(gray, (5, 5), 0)
-            _, gray = cv2.threshold(gray, black_thres, 255, cv2.THRESH_BINARY)
-
-            en_up,en_down,en_left,en_right = check_corner(gray,f2_h,f2_w) 
-
-            if state == STATE_NOT_UP:
-                if en_up:
-                    send_rc(0,0,-20,0)
-                    state = STATE_UP
-                    continue
-                else:
-                    send_rc(-20,0,0,0)
-                    continue
-
-            if state == STATE_UP:
-                if en_up:
-                    send_rc(0,0,-20,0)
-                    continue
-                else:
-                    send_rc(-20,0,0,0)
-                    state = STATE_UP 
-                    continue
-
-            if has_marker():
-                print("finish follow")
-                drone.land()
-                return
-
-            if en_down:
-                send_rc(0,0,20,0)
-            elif en_left:
-                send_rc(-20,0,0,0)
-
 def main():
-    global drone
     drone = Tello()
     drone.connect()
     drone.streamon()
     drone.takeoff()
     time.sleep(4)
     
-    # # # 1. 飛到人臉前，飛過板子，看到第二張人臉，飛過桌子底下
+    # # 1. 飛到人臉前，飛過板子，看到第二張人臉，飛過桌子底下
     # drone.move("up", 75)
     # drone.move("forward", 140)
     # see_face(drone, face_cascade)
@@ -523,15 +386,12 @@ def main():
     # drone.move("forward", 130)
 
     # 2. 偵測娃娃，開始循線
-    try_follow()
-    return
+    drone.move("up", 30)
 
-
-    drone.move("up", 20)
     detected_doll = detect_objects(drone)
     print(f"Saw {detect_objects}\n")
     see(drone, 1)
-    drone.move("left", 10)
+    drone.move("left", 20)
     if detected_doll == "Kanahei":
 
         drone.move("left", 100)
@@ -541,18 +401,14 @@ def main():
         print("0 corner")
 
         print("Move up!")
-        sleep(1)
         trace_line(drone, [0,0,8,0], [0,0,0,1,1,0,0,1,0], horizontal_trace=False, target_corner=1)
         print("1 corner")
 
         print("Move left!")
-        sleep(1)
         trace_line(drone, [-8,0,0,0], [0,0,0,0,1,1,0,1,2], horizontal_trace=True, target_corner=2)
         print("2 corner")
 
         print("Move down!")
-        sleep(1)
-
         trace_line(drone, [0,0,-8,0], [0,1,0,1,1,0,0,0,0], horizontal_trace=False, target_corner=3)
         print("3 corner")
 
@@ -573,7 +429,7 @@ def main():
         print("1 corner detected")
 
         print("Moving up!")
-        trace_line(drone, [0,0,8,0], [2,2,2,1,1,2,2,1,2], horizontal_trace=False, target_corner=3)
+        trace_line(drone, [0,0,8,0], [0,0,0,1,1,0,0,1,0], horizontal_trace=False, target_corner=3)
         print("2 corner detected")
 
         print("Moving left!")
@@ -590,11 +446,9 @@ def main():
 
         print("Moving down!")
         trace_line(drone, [0,0,8,0], [0,1,0,1,1,1,0,0,0], horizontal_trace=False, target_corner=7)
-        print("6 corner detected")
 
-        print("Moving left!")
-        trace_line(drone, [-8,0,0,0], [0,1,0,1,1,1,2,0,2], horizontal_trace=True, target_corner=6)
 
+        
     # TODO part3 and part4
     # 結束循線，判斷娃娃決定路徑，準備降落
     drone.move("back", 30)

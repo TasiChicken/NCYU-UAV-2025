@@ -1,0 +1,1 @@
+python train.py --device 0 --batch-size 8 --data data/data.yaml --img 1280 720 --cfg cfg/training/yolov7-tiny-lab9.yaml --weights 'yolov7-tiny.pt' --name yolov7-lab09 --hyp data/hyp.scratch.tiny.yaml --epoch 300

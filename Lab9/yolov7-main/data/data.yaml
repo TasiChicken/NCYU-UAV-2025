@@ -8,6 +8,6 @@ names: ['carna', 'melody']
 roboflow:
   workspace: uav-lab09-4tsjk
   project: uav-lab09-n84aw
-  version: 5
+  version: 6
   license: CC BY 4.0
-  url: https://universe.roboflow.com/uav-lab09-4tsjk/uav-lab09-n84aw/dataset/5
+  url: https://universe.roboflow.com/uav-lab09-4tsjk/uav-lab09-n84aw/dataset/6
