@@ -7,6 +7,7 @@ from pyimagesearch.pid import PID
 from keyboard_djitellopy import keyboard
 from face_detection import see_face
 from object_detection import detect_objects
+from try_part2 import main as part2_main
 
 
 black_thres = 30
@@ -297,8 +298,7 @@ def see_multi(drone, markId, z_dist=60):
                                 org=text_coor, color=(0, 255, 0), thickness=1)
 
             # Display the nearest marker
-            frame = cv2.aruco.drawAxis(frame, intrinsic, distortion, rvec[target_idx], tvec[target_idx], 7)
-
+            frame = cv2.drawFrameAxes(frame, intrinsic, distortion, rvec[target_idx], tvec[target_idx], 7)
             (x_err, y_err, z_err) = tvec[target_idx][0]
             z_err = z_err - z_dist
             x_err = x_err * 2
@@ -372,6 +372,7 @@ def test(drone):
 def main():
     drone = Tello()
     drone.connect()
+    print(f"Battery: {drone.get_battery()}%")
     drone.streamon()
     drone.takeoff()
     time.sleep(4)
@@ -380,72 +381,81 @@ def main():
     # drone.move("up", 75)
     # drone.move("forward", 140)
     # see_face(drone, face_cascade)
-    # drone.move("up", 60)
+    # drone.move("up", 60)22
     # drone.move("forward", 130)
     # drone.move("down", 150)
     # drone.move("forward", 130)
 
     # 2. 偵測娃娃，開始循線
     drone.move("up", 30)
-
     detected_doll = detect_objects(drone)
     print(f"Saw {detect_objects}\n")
     see(drone, 1)
-    drone.move("left", 20)
-    if detected_doll == "Kanahei":
+    part2_main(drone=drone, is_Kanahei=(detected_doll == "Kanahei"))
+    drone.land()
+    return
 
-        drone.move("left", 100)
 
-        print("Move left!")
-        trace_line(drone, [-8,0,0,0], [0,1,0,1,1,1,0,0,0], horizontal_trace=True, target_corner=0)
-        print("0 corner")
+    
 
-        print("Move up!")
-        trace_line(drone, [0,0,8,0], [0,0,0,1,1,0,0,1,0], horizontal_trace=False, target_corner=1)
-        print("1 corner")
+    # detected_doll = detect_objects(drone)
+    # print(f"Saw {detect_objects}\n")
+    # see(drone, 1)
+    # drone.move("left", 20)
+    # if detected_doll == "Kanahei":
 
-        print("Move left!")
-        trace_line(drone, [-8,0,0,0], [0,0,0,0,1,1,0,1,2], horizontal_trace=True, target_corner=2)
-        print("2 corner")
+    #     drone.move("left", 100)
 
-        print("Move down!")
-        trace_line(drone, [0,0,-8,0], [0,1,0,1,1,0,0,0,0], horizontal_trace=False, target_corner=3)
-        print("3 corner")
+    #     print("Move left!")
+    #     trace_line(drone, [-8,0,0,0], [0,1,0,1,1,1,0,0,0], horizontal_trace=True, target_corner=0)
+    #     print("0 corner")
 
-        print("Moving left!")
-        trace_line(drone, [-8,0,0,0],  [0,0,0,0,1,1,0,1,2], horizontal_trace=True, target_corner=4)
-        print("4 corner")
+    #     print("Move up!")
+    #     trace_line(drone, [0,0,8,0], [0,0,0,1,1,0,0,1,0], horizontal_trace=False, target_corner=1)
+    #     print("1 corner")
 
-        print("Move down!")
-        trace_line(drone, [0,0,8,0], [0,1,0,1,1,0,0,0,0], horizontal_trace=False, target_corner=5)
-        print("5 corner")
+    #     print("Move left!")
+    #     trace_line(drone, [-8,0,0,0], [0,0,0,0,1,1,0,1,2], horizontal_trace=True, target_corner=2)
+    #     print("2 corner")
 
-        print("Move left!")
-        trace_line(drone, [-8,0,0,0], [0,1,0,1,1,1,2,0,2], horizontal_trace=True, target_corner=6)
+    #     print("Move down!")
+    #     trace_line(drone, [0,0,-8,0], [0,1,0,1,1,0,0,0,0], horizontal_trace=False, target_corner=3)
+    #     print("3 corner")
 
-    else:
-        print("Moving left!")
-        trace_line(drone, [-8,0,0,0], [2,1,2,1,1,1,2,0,2], horizontal_trace=True, target_corner=2)
-        print("1 corner detected")
+    #     print("Moving left!")
+    #     trace_line(drone, [-8,0,0,0],  [0,0,0,0,1,1,0,1,2], horizontal_trace=True, target_corner=4)
+    #     print("4 corner")
 
-        print("Moving up!")
-        trace_line(drone, [0,0,8,0], [0,0,0,1,1,0,0,1,0], horizontal_trace=False, target_corner=3)
-        print("2 corner detected")
+    #     print("Move down!")
+    #     trace_line(drone, [0,0,8,0], [0,1,0,1,1,0,0,0,0], horizontal_trace=False, target_corner=5)
+    #     print("5 corner")
 
-        print("Moving left!")
-        trace_line(drone, (-8,0,0,0), [0,1,0,0,1,1,0,0,2], horizontal_trace=True, target_corner=4)
-        print("3 corner detected")
+    #     print("Move left!")
+    #     trace_line(drone, [-8,0,0,0], [0,1,0,1,1,1,2,0,2], horizontal_trace=True, target_corner=6)
 
-        print("Moving up!")
-        trace_line(drone, [0,0,8,0], [2,2,2,1,1,2,2,1,2], horizontal_trace=False, target_corner=5)
-        print("4 corner detected")
+    # else:
+    #     print("Moving left!")
+    #     trace_line(drone, [-8,0,0,0], [2,1,2,1,1,1,2,0,2], horizontal_trace=True, target_corner=2)
+    #     print("1 corner detected")
 
-        print("Moving left!")
-        trace_line(drone, (-8,0,0,0), [0,0,0,1,1,1,0,1,0], horizontal_trace=True, target_corner=6)
-        print("5 corner detected")
+    #     print("Moving up!")
+    #     trace_line(drone, [0,0,8,0], [0,0,0,1,1,0,0,1,0], horizontal_trace=False, target_corner=3)
+    #     print("2 corner detected")
 
-        print("Moving down!")
-        trace_line(drone, [0,0,8,0], [0,1,0,1,1,1,0,0,0], horizontal_trace=False, target_corner=7)
+    #     print("Moving left!")
+    #     trace_line(drone, (-8,0,0,0), [0,1,0,0,1,1,0,0,2], horizontal_trace=True, target_corner=4)
+    #     print("3 corner detected")
+
+    #     print("Moving up!")
+    #     trace_line(drone, [0,0,8,0], [2,2,2,1,1,2,2,1,2], horizontal_trace=False, target_corner=5)
+    #     print("4 corner detected")
+
+    #     print("Moving left!")
+    #     trace_line(drone, (-8,0,0,0), [0,0,0,1,1,1,0,1,0], horizontal_trace=True, target_corner=6)
+    #     print("5 corner detected")
+
+    #     print("Moving down!")
+    #     trace_line(drone, [0,0,8,0], [0,1,0,1,1,1,0,0,0], horizontal_trace=False, target_corner=7)
 
 
         
@@ -464,7 +474,8 @@ def main():
     
     # 1. 確保先對準 Marker 2，作為轉身的基準點
     # 稍微後退一點避免太貼牆，好讓鏡頭看得到 marker
-    drone.move("back", 20) 
+    drone.move("up", 60)
+    drone.move("back", 40) 
     see(drone, 2)
     
     # 2. 旋轉 180 度面向桌子
@@ -474,14 +485,14 @@ def main():
 
     # 3. 對準人臉 (假設 see_face 會調整無人機位置對齊人臉)
     print("Aligning with Face...")
-    see_face(drone, face_cascade)
+    see_face(drone, face_cascade, 60)
     
     # 4. 往下降並穿越桌子
     # 假設人臉在桌子上，無人機需要下降夠多才能鑽過去 (例如下降 60-80cm)
     print("Going under the table...")
-    drone.move("down", 60) 
+    drone.move("down", 70) 
     # 穿越桌子的距離 (根據地圖桌寬 + 緩衝，約 150-200cm)
-    drone.move("forward", 180) 
+    drone.move("forward", 200) 
 
     # ------------------------------------------------------
     # Part 4: 轉身 90 -> 辨識娃娃 -> 左右分流 -> 對準 Marker 3 降落
@@ -496,21 +507,22 @@ def main():
     # 2. 辨識娃娃
     print("Detecting Doll...")
     # 稍微上升一點或前進一點以利辨識 (視鏡頭角度而定，如果太低可能要 move up)
-    drone.move("up", 20) 
+    drone.move("up", 50) 
     target_doll = detect_objects(drone)
     print(f"Decision: Doll is {target_doll}")
+    drone.move("up", 60)
 
     # 3. 根據娃娃決定左右分流 (假設 Kanahei 往左側桌子，其他往右側桌子)
     if target_doll == "Kanahei":
         print("Go Left path")
-        drone.move("left", 60)
+        drone.move("left", 40)
     else:
         print("Go Right path")
-        drone.move("right", 60)
+        drone.move("right", 40)
 
     # 4. 前進接近降落區
     print("Approaching Landing Zone...")
-    drone.move("forward", 100)
+    drone.move("forward", 50)
 
     # 5. 搜尋並對準 Marker 3 (使用 see_multi 會找最近的那個 ID 3)
     print("Aligning with Marker 3...")

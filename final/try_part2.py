@@ -72,8 +72,8 @@ ind = 0
 chase_LR = -1
 chase_UD = 0
 THRESHOLD_COUNT = 300
-CHASE_LR_SPEED = 12
-CHASE_UD_SPEED = 17
+CHASE_LR_SPEED = 20
+CHASE_UD_SPEED = 20
 
 HSV_upper = [110,247,107]#[110,247,101]#[126,255,255]
 HSV_bottom = [101,190,69]#[101,190,69]            #[97,233,232]
@@ -348,6 +348,7 @@ def main(drone, is_Kanahei):
 
     try:
         while True: 
+            print("state: {}".format(current_state))
             frame = frame_reader.frame
 
             height,width,_ = frame.shape
@@ -385,10 +386,9 @@ def main(drone, is_Kanahei):
             #       FSM states
             ##########################################################################
             elif(current_state == State.center):
-                print("state: {}".format(current_state))
                 target_idex = find_id(markerIds, 1)
                 if target_idex != -1:
-                    correct_ready = correct_v2(rvec, tvec, target_idex, 55,x_pid, y_pid, z_pid, yaw_pid)
+                    correct_ready = correct_v2(drone, rvec, tvec, target_idex, 55,x_pid, y_pid, z_pid, yaw_pid)
                 else:     
                     send_rc(drone, 0,-20,0,0)
                     correct_ready = False
@@ -399,7 +399,6 @@ def main(drone, is_Kanahei):
                     start_time = time.time()
 
             elif(current_state == State.up1):
-                print("state: {}".format(current_state))
 
                 if(is_Kanahei):
                     if(time.time() - start_time > 0.8): #fly left  for 0.8sec
@@ -459,7 +458,7 @@ def main(drone, is_Kanahei):
             elif(current_state == State.LD):
                 target_idex = find_id(markerIds, 2)
                 if target_idex != -1:
-                    correct_ready = correct_v2(rvec, tvec, target_idex, 55,x_pid, y_pid, z_pid, yaw_pid)
+                    correct_ready = correct_v2(drone, rvec, tvec, target_idex, 55,x_pid, y_pid, z_pid, yaw_pid)
                 else:     
                     correct_ready = False
                     en_up,en_down,en_left,en_right = check_corner(frame3,f2_h,f2_w)
