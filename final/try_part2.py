@@ -72,8 +72,8 @@ ind = 0
 chase_LR = -1
 chase_UD = 0
 THRESHOLD_COUNT = 300
-CHASE_LR_SPEED = 20
-CHASE_UD_SPEED = 20
+CHASE_LR_SPEED = 15
+CHASE_UD_SPEED = 15
 
 HSV_upper = [110,247,107]#[110,247,101]#[126,255,255]
 HSV_bottom = [101,190,69]#[101,190,69]            #[97,233,232]
@@ -366,7 +366,7 @@ def main(drone, is_Kanahei):
             frame3 = cv2.dilate(frame3, kernel, iterations=1)
             
             markerIds = []
-            markerCorners, markerIds, rejectedCandidates =cv2.aruco.detectMarkers(frame, dictionary, parameters=parameters)
+            markerCorners, markerIds, rejectedCandidates = cv2.aruco.detectMarkers(frame, dictionary, parameters=parameters)
             
             correct_ready = False
             
