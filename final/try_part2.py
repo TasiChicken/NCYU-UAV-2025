@@ -71,7 +71,7 @@ ind = 0
 ################################################
 chase_LR = -1
 chase_UD = 0
-THRESHOLD_COUNT = 200
+THRESHOLD_COUNT = 300
 CHASE_LR_SPEED = 12
 CHASE_UD_SPEED = 17
 
@@ -173,13 +173,6 @@ def send_rc(drone, lr: float, fb: float, ud: float, yaw: float):
         last_send = curr
         drone.send_rc_control(int(lr), int(fb), int(ud), int(yaw))
 
-def battery_dis_per30s():
-    curr_time = time.time()
-    if (curr_time-prev_time)>30:
-        prev_time = curr_time
-        battery = drone.get_battery()
-        print("Now battery: {}".format(battery))
-
 def MAX_threshold(value):
     if value > MAX_SPEED_THRESHOLD:
         print("fixed to {}".format(str(MAX_SPEED_THRESHOLD)))
@@ -204,7 +197,7 @@ def find_id(markerIds, id)->int:
                 find_target = i           
     return find_target
 
-def correct_v2(rvec, tvec, i, dist_diff, x_pid, y_pid, z_pid, yaw_pid, countable= True)->bool:
+def correct_v2(drone, rvec, tvec, i, dist_diff, x_pid, y_pid, z_pid, yaw_pid, countable= True)->bool:
     global Z_BASE, counter
 
     PID_state = {}
@@ -274,7 +267,6 @@ def correct_v2(rvec, tvec, i, dist_diff, x_pid, y_pid, z_pid, yaw_pid, countable
     print("org: {}||{}||{}||{}".format(PID_state["org_x"],PID_state["org_y"],PID_state["org_z"],PID_state["org_yaw"]))
     print("PID: {}||{}||{}||{}".format(PID_state["pid_x"],PID_state["pid_y"],PID_state["pid_z"],PID_state["pid_yaw"]))
     print("--------------------------------------------")
-    text ="ID:{}|x,y,z||angle = {},{},{}||{}".format(len(markerIds), tvec[i,0,0], tvec[i,0,1], tvec[i,0,2], angle_diff) 
     #print(tvec)
     #cv2.putText(frame, text, (10, 40), cv2.FONT_HERSHEY_SIMPLEX,0.5, (0, 0, 255), 1, cv2.LINE_AA)
     if(tvec[i,0,0]<=CORRECT_THRESHOD_X and tvec[i,0,0]>=(-1)*CORRECT_THRESHOD_X\
@@ -293,47 +285,35 @@ def correct_v2(rvec, tvec, i, dist_diff, x_pid, y_pid, z_pid, yaw_pid, countable
 
 #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 def check_corner(frame, f2_h, f2_w):
-    en_up, en_down, en_left, en_right = False,False,False,False
+    # 使用 Numpy 切片定義感興趣區域 (ROI)
+    # 這裡的 frame 已經是二值化後的黑白圖 (frame3)
     
-    count_blue = 0
-    for x in range(f2_w-1,f2_w-int(f2_w/FRAME_DIVIDER)-1,-1):
-        for y in range(f2_h):
-            if (frame[y,x]==255):
-                count_blue+=1
-        if count_blue>=THRESHOLD_COUNT:
-            en_right = True
-            break
+    divider = int(FRAME_DIVIDER)
+    w_div = int(f2_w / divider)
+    h_div = int(f2_h / divider)
+    
+    # 定義區域 [y_start:y_end, x_start:x_end]
+    roi_left = frame[:, 0:w_div]
+    roi_right = frame[:, f2_w - w_div:]
+    roi_up = frame[0:h_div, :]
+    roi_down = frame[f2_h - h_div:, :] # 注意這裡是否需要減去更精確的值，依你原邏輯調整
+    
+    # 計算白色像素 (255) 的數量
+    # cv2.countNonZero 比 Python 迴圈快非常多
+    cnt_left = cv2.countNonZero(roi_left)
+    cnt_right = cv2.countNonZero(roi_right)
+    cnt_up = cv2.countNonZero(roi_up)
+    cnt_down = cv2.countNonZero(roi_down)
+    
+    # 判斷是否超過閾值
+    en_left = cnt_left >= THRESHOLD_COUNT
+    en_right = cnt_right >= THRESHOLD_COUNT
+    en_up = cnt_up >= THRESHOLD_COUNT
+    
+    # 你原本的 Down 邏輯似乎閾值不同 (500)，這裡保留原本的數值
+    en_down = cnt_down >= THRESHOLD_COUNT 
 
-    count_blue = 0
-    for x in range(0,int(f2_w/FRAME_DIVIDER)):
-        for y in range(f2_h):
-            if (frame[y,x]==255):
-                count_blue+=1
-        if count_blue>=THRESHOLD_COUNT:
-            en_left = True
-            break
-
-    count_blue = 0
-
-    for y in range(0,int(f2_h/FRAME_DIVIDER)):
-        for x in range(f2_w):
-            if (frame[y,x]==255):
-                count_blue+=1
-        if count_blue>=THRESHOLD_COUNT:
-            en_up = True
-            break
-
-    count_blue = 0
-    for y in range(f2_h-int(f2_h/FRAME_DIVIDER)-1,f2_h):
-    #for y in range(f2_h-int(f2_h/5.575)-1,f2_h):
-        for x in range(f2_w):
-            if (frame[y,x]==255):
-                count_blue+=1
-        if count_blue>=500:
-            en_down = True
-            break
     return en_up, en_down, en_left, en_right
-
 
 
 
@@ -342,29 +322,33 @@ def check_corner(frame, f2_h, f2_w):
 ####################################################################################
     
 def main(drone, is_Kanahei):
+    global is_flying
+
+    # --- 初始化區塊 (只執行一次) ---
     current_state = State.center
-    global is_flying, prev_time, curr_time
     is_flying = True
-    cali_intr, cali_dist = intrinsic_parameter()    #fetch the calibration data
+    cali_intr, cali_dist = intrinsic_parameter()
+    
+    # PID 設定
     x_pid = PID(kP=0.75, kI=0.0001, kD=0.8)
-    z_pid = PID(kP=0.8, kI=0.0005, kD=0.2)  # Use tvec_z (tvec[i,0,2])----> control forward and backward
+    z_pid = PID(kP=0.8, kI=0.0005, kD=0.2)
     y_pid = PID(kP=0.72, kI=0.0036, kD=0.2)
-    yaw_pid = PID(kP=0.8,kI=0.0001, kD=0.15)
-    x_pid.initialize()
-    z_pid.initialize()
-    y_pid.initialize()
-    yaw_pid.initialize()
+    yaw_pid = PID(kP=0.8, kI=0.0001, kD=0.15)
+    
+    for pid in [x_pid, z_pid, y_pid, yaw_pid]:
+        pid.initialize()
 
     dictionary = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
     parameters = cv2.aruco.DetectorParameters()
-    prev_time = time.time()
+    drone.streamon()
+
     key = -1
+
+    frame_reader = drone.get_frame_read()
 
     try:
         while True: 
-            drone.streamon()
-            frame = drone.get_frame_read()
-            frame = frame.frame
+            frame = frame_reader.frame
 
             height,width,_ = frame.shape
             f2_h, f2_w = int(height/3), int(width/3)
@@ -406,7 +390,7 @@ def main(drone, is_Kanahei):
                 if target_idex != -1:
                     correct_ready = correct_v2(rvec, tvec, target_idex, 55,x_pid, y_pid, z_pid, yaw_pid)
                 else:     
-                    send_rc(0,-20,0,0)
+                    send_rc(drone, 0,-20,0,0)
                     correct_ready = False
 
                 if (correct_ready == True):
@@ -497,7 +481,7 @@ def main(drone, is_Kanahei):
                     elif(en_left):
                         send_rc(drone, -1*(CHASE_LR_SPEED),0,0,0)
                     else :
-                        send_rc(0,-10,0,0)
+                        send_rc(drone, 0,-10,0,0)
 
                 if (correct_ready == True):
                     return

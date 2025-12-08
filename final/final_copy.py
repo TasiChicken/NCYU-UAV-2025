@@ -172,7 +172,7 @@ def init_pids(kP=0.5, kI=0.0001, kD=0.1):
     yaw_pid.initialize()
     return z_pid, y_pid, x_pid, yaw_pid
 
-def see(drone, markId):
+def see(drone, markId, z_dist=50):
     frame_read = drone.get_frame_read()
 
     dictionary = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
@@ -206,7 +206,7 @@ def see(drone, markId):
 
             rvec, tvec, _objPoints = cv2.aruco.estimatePoseSingleMarkers(markerCorners, 15, intrinsic, distortion)
             (x_err, y_err, z_err) = tvec[target_idx][0]
-            z_err = z_err - 50
+            z_err = z_err - z_dist
             x_err = x_err * 2
             y_err = - (y_err + 10) * 2
 
