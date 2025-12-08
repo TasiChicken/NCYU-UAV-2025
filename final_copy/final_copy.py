@@ -25,44 +25,26 @@ def square_same(input, truth):
 
 def line_follower(frame):
     frame = cv2.resize(frame, (0, 0), fx=0.1, fy=0.1)
-    height, width = frame.shape
     
-    # 計算九宮格的邊界
-    h_borders = [0, height//3, 2*height//3, height]
-    w_borders = [0, width//3, 2*width//3, width]
+    # Ensure dimensions are divisible by 3 for equal splitting
+    h, w = frame.shape
+    h = (h // 3) * 3
+    w = (w // 3) * 3
+    frame = frame[:h, :w]
     
-    # 初始化九宮格的計數器
-    squares = {
-        'tl': 0, 'tm': 0, 'tr': 0,
-        'ml': 0, 'mm': 0, 'mr': 0,
-        'bl': 0, 'bm': 0, 'br': 0
-    }
+    # Reshape into 3x3 grid blocks: (rows, block_height, cols, block_width)
+    grid = frame.reshape(3, h // 3, 3, w // 3)
     
-    # 計算每個格子的總像素數
-    total_pixels = (height//3) * (width//3)
-    threshold = 0.1  # 可以調整這個閾值
-    max_ratio = 0
-    # 遍歷每個九宮格
-    for i, (h1, h2) in enumerate(zip(h_borders[:-1], h_borders[1:])):
-        for j, (w1, w2) in enumerate(zip(w_borders[:-1], w_borders[1:])):
-            # 取得當前格子的所有像素
-            region = frame[h1:h2, w1:w2]
-            # 計算黑色像素（值為0）的數量
-            black_pixels = np.sum(region == 0)
-            # 計算黑色像素的比例
-            black_ratio = black_pixels / total_pixels
-            max_ratio = max(max_ratio, black_ratio)
-            
-            # 根據位置設置對應的格子值
-            pos = ['tl', 'tm', 'tr',
-                  'ml', 'mm', 'mr',
-                  'bl', 'bm', 'br'][i*3 + j]
-            squares[pos] = 1 if black_ratio > threshold else 0
+    # Calculate ratio of black pixels (value 0) for each cell
+    # Axis (1, 3) aggregates the pixels within each block
+    ratios = np.mean(grid == 0, axis=(1, 3))
     
-    # 返回結果列表，保持原有的順序
-    return [squares['tl'], squares['tm'], squares['tr'],
-            squares['ml'], squares['mm'], squares['mr'],
-            squares['bl'], squares['bm'], squares['br']], max_ratio
+    max_ratio = np.max(ratios)
+    threshold = 0.1
+    
+    # Generate binary list based on threshold
+    # The order of flatten is row-major (tl, tm, tr...), which matches the required output
+    return (ratios > threshold).astype(int).flatten().tolist(), max_ratio
 
 def put_detected_square(frame, detected_squares, is_gray):
     height, width = 0, 0
@@ -400,90 +382,111 @@ def main():
         # |
         #---
         print("Move left!")
-        trace_line(drone, [-10,0,0,0], [2,1,2,2,1,2,2,2,2], horizontal_trace=True, target_corner=0)
+        trace_line(drone, [-20,0,0,0], [2,1,2,2,1,2,2,2,2], horizontal_trace=True, target_corner=0)
         print("0 corner")
 
         #---
         # |
         print("Move up!")
         drone.move("up", 20)
-        trace_line(drone, [0,0,10,0], [0,0,0,1,1,2,2,2,2], horizontal_trace=False, target_corner=1)
+        trace_line(drone, [0,0,20,0], [0,0,0,1,1,2,2,2,2], horizontal_trace=False, target_corner=1)
         print("1 corner")
 
         #--
         #|
         print("Move left!")
         drone.move("left", 20)
-        trace_line(drone, [-10,0,0,0], [0,2,2,0,1,2,0,1,2], horizontal_trace=True, target_corner=2)
+        trace_line(drone, [-20,0,0,0], [0,2,2,0,1,2,0,1,2], horizontal_trace=True, target_corner=2)
         print("2 corner")
 
         # |
         #--
         print("Move down!")
         drone.move("down", 20)
-        trace_line(drone, [0,0,-10,0], [2,2,2,1,1,2,0,0,0], horizontal_trace=False, target_corner=3)
+        trace_line(drone, [0,0,-20,0], [2,2,2,1,1,2,0,0,0], horizontal_trace=False, target_corner=3)
         print("3 corner")
 
         #--
         #|
         print("Moving left!")
         drone.move("left", 20)
-        trace_line(drone, [-10,0,0,0],  [0,2,2,0,1,2,0,1,2], horizontal_trace=True, target_corner=4)
+        trace_line(drone, [-20,0,0,0],  [0,2,2,0,1,2,0,1,2], horizontal_trace=True, target_corner=4)
         print("4 corner")
 
         # |
         #---
         print("Move down!")
-        trace_line(drone, [0,0,-10,0], [2,2,2,1,1,2,0,0,0], horizontal_trace=False, target_corner=5)
+        trace_line(drone, [0,0,-20,0], [2,2,2,1,1,2,0,0,0], horizontal_trace=False, target_corner=5)
         print("5 corner")
 
         print("Move left!")
-        drone.move("left", 50)
+        drone.move("left", 100)
     else:
         # |
         #---
         print("Moving left!")
         drone.move("left", 20)
-        trace_line(drone, [-10,0,0,0], [2,1,2,2,1,2,2,2,2], horizontal_trace=True, target_corner=2)
+        trace_line(drone, [-20,0,0,0], [2,1,2,2,1,2,2,2,2], horizontal_trace=True, target_corner=2)
         print("1 corner detected")
 
         #--
         # |
         print("Moving up!")
         drone.move("up", 20)
-        trace_line(drone, [0,0,10,0], [0,0,0,1,1,2,2,2,2], horizontal_trace=False, target_corner=3)
+        trace_line(drone, [0,0,20,0], [0,0,0,1,1,2,2,2,2], horizontal_trace=False, target_corner=3)
         print("2 corner detected")
 
         #|
         #--
         print("Moving left!")
         drone.move("left", 20)
-        trace_line(drone, (-10,0,0,0), [0,1,2,0,1,2,0,2,2], horizontal_trace=True, target_corner=4)
+        trace_line(drone, (-20,0,0,0), [0,1,2,0,1,2,0,2,2], horizontal_trace=True, target_corner=4)
         print("3 corner detected")
 
         #--
         # |
         print("Moving up!")
         drone.move("up", 20)
-        trace_line(drone, [0,0,10,0], [0,0,0,1,1,2,2,2,2], horizontal_trace=False, target_corner=5)
+        trace_line(drone, [0,0,20,0], [0,0,0,1,1,2,2,2,2], horizontal_trace=False, target_corner=5)
         print("4 corner detected")
 
         #---
         # |
         print("Moving left!")
         drone.move("left", 20)
-        trace_line(drone, (-10,0,0,0), [2,2,2,2,1,2,2,1,2], horizontal_trace=True, target_corner=6)
+        trace_line(drone, (-20,0,0,0), [2,2,2,2,1,2,2,1,2], horizontal_trace=True, target_corner=6)
         print("5 corner detected")
 
         # |
         #---
         print("Move down!")
         drone.move("down", 20)
-        trace_line(drone, [0,0,-10,0], [2,2,2,1,1,2,0,0,0], horizontal_trace=False, target_corner=5)
+        trace_line(drone, [0,0,-20,0], [2,2,2,1,1,2,0,0,0], horizontal_trace=False, target_corner=5)
         print("5 corner")
 
         print("Moving left!")
-        drone.move("left", 130)
+        drone.move("left", 150)
+
+    print("Searching for marker (Left)...")
+    dictionary = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50)
+    parameters = cv2.aruco.DetectorParameters()
+    while True:
+        frame = drone.get_frame_read().frame
+        markerCorners, markerIds, _ = cv2.aruco.detectMarkers(frame, dictionary, parameters=parameters)
+        
+        if markerIds is not None:
+            print(f"Marker found: {markerIds}")
+            drone.send_rc_control(0, 0, 0, 0)
+            break
+            
+        drone.send_rc_control(-20, 0, 0, 0)
+        
+        cv2.aruco.drawDetectedMarkers(frame, markerCorners, markerIds)
+        cv2.imshow('drone', frame)
+        
+        key = cv2.waitKey(33)
+        if key != -1:
+            keyboard(drone, key)
 
         
     # TODO part3 and part4
