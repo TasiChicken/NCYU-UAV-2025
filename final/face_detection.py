@@ -18,7 +18,7 @@ def mss(update, max_speed_threshold=30):
 
     return update
 
-def see_face(drone, face_cascade ):
+def see_face(drone, face_cascade, z_dist=40):
     tvec = None
     frame_read = drone.get_frame_read()
     fs = cv2.FileStorage("calib_tello.xml", cv2.FILE_STORAGE_READ)
@@ -59,7 +59,7 @@ def see_face(drone, face_cascade ):
             keyboard(drone, key)
         elif face_rects is not None and tvec is not None:
             (x_err, y_err, z_err) = tvec[:,0]
-            z_err = z_err - 40
+            z_err = z_err - z_dist
             x_err = x_err * 2
             y_err = - (y_err + 10) * 2
 
