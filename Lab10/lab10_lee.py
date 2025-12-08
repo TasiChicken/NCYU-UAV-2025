@@ -14,7 +14,7 @@ import cv2
 import logging
 import os
 from pyimagesearch.pid import PID
-from config import DroneConfig
+from configer import DroneConfig
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -192,7 +192,7 @@ class Context:
     last_ids: Optional[np.ndarray] = None
     last_poses: Dict[int, Tuple[np.ndarray, np.ndarray]] = field(default_factory=dict)
     airborne: bool = False
-    simulation: bool = True  # Default to simulation mode
+    simulation: bool = False  # Default to not simulation
     last_cmd_texts: deque = field(default_factory=lambda: deque(maxlen=1))
     config: DroneConfig = field(default_factory=DroneConfig)
 
@@ -783,7 +783,7 @@ def main():
         pid_ud=pid_ud,
         pid_fb=pid_fb,
         airborne=False,  # Ground
-        simulation=True,  # Default to simulation mode
+        simulation=False,  # Default to simulation mode
         config=DroneConfig()
     )
     fsm = DroneFSM(ctx)
