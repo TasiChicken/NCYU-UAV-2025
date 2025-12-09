@@ -211,7 +211,7 @@ def see(drone, markId):
             rv = int(mss(yaw_err, 50))
             # print(xv, yv, zv, rv)
             # drone.send_rc_control(min(20, int(xv//2)), min(20, int(zv//2)), min(20, int(yv//2)), 0)
-            if abs(z_err) <= 10 and abs(y_err) <= 50 and abs(x_err) <= 50 and abs(yaw_err) <= 10:
+            if abs(z_err) <= 10 and abs(y_err) <= 10 and abs(x_err) <= 10 and abs(yaw_err) <= 10:
                 print("Saw marker", markId)
                 drone.send_rc_control(0, 0, 0, 0)
                 cv2.destroyAllWindows()
@@ -360,7 +360,7 @@ def main():
     drone.takeoff()
     time.sleep(4)
     
-    # # 1. 飛到人臉前，飛過板子，看到第二張人臉，飛過桌子底下
+    # # # 1. 飛到人臉前，飛過板子，看到第二張人臉，飛過桌子底下
     # drone.move("up", 75)
     # drone.move("forward", 140)
     # see_face(drone, face_cascade)

@@ -156,6 +156,7 @@ def trace_line(drone, speed_output, target_square, horizontal_trace=False, targe
     drone.send_rc_control(0,0,0,0)
 
 def post_trace_till_marker(drone, frame, left_speed=-20):
+    (height, width, _) = frame.shape
     frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     gray = cv2.GaussianBlur(gray, (5, 5), 0)

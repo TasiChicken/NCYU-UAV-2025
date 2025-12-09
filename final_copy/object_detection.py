@@ -9,6 +9,8 @@ from models.experimental import attempt_load
 from utils.datasets import letterbox
 from utils.general import non_max_suppression_kpt, scale_coords
 from utils.plots import plot_one_box
+from keyboard_djitellopy import keyboard
+
 # import sys
 # import os
 # sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -29,6 +31,10 @@ fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # or 'XVID' for .avi
 def detect_objects(drone):
     # frame = drone.get_frame_read().frame
     while True:         
+        key = cv2.waitKey(33)
+        if key != -1:
+            keyboard(drone, key) 
+
         frame = drone.get_frame_read().frame
         image_orig = frame.copy()
         image = letterbox(frame, (640, 640), stride=64, auto=True)[0]
@@ -49,8 +55,6 @@ def detect_objects(drone):
             detected_objects.append((names[int(cls)]))
 
         cv2.imshow("Detected", image_orig)
-        cv2.waitKey(1)
-
         if "carna" in detected_objects:
             cv2.destroyAllWindows()
             return "Kanahei"
