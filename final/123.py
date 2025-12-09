@@ -385,6 +385,71 @@ def left_until_any_marker_detected(drone):
         markerCorners, markerIds, rejectedCandidates = cv2.aruco.detectMarkers(frame, dictionary, parameters=parameters)
         if markerIds is not None:
             return
+def see_face_f(drone, face_cascade, z_dist=40):
+    face_x = 15
+    face_y = 15
+    tvec = None
+    frame_read = drone.get_frame_read()
+    fs = cv2.FileStorage("calib_tello.xml", cv2.FILE_STORAGE_READ)
+    intrinsic = fs.getNode("K").mat()
+    distortion = fs.getNode("D").mat()
+
+    z_pid = PID(kP=0.7, kI=0.0001, kD=0.1)
+    y_pid = PID(kP=0.7, kI=0.0001, kD=0.1)
+    x_pid = PID(kP=0.7, kI=0.0001, kD=0.1)
+    yaw_pid = PID(kP=0.7, kI=0.0001, kD=0.1)
+
+    z_pid.initialize()
+    y_pid.initialize()
+    x_pid.initialize()
+    yaw_pid.initialize()
+
+    while True:
+        frame = frame_read.frame
+        # print(frame)
+        if frame.sum() == 0:
+            continue
+        
+        face_rects = face_cascade.detectMultiScale(frame, 
+                                               scaleFactor=1.06,
+                                               minNeighbors=20,
+                                               minSize=(60, 60))
+        
+        for (x, y, w, h) in face_rects:
+            img_pts = np.array([[x, y], [x+w, y], [x+w, y+h], [x, y+h]], dtype=np.float32)
+            obj_pts = np.array([[0, 0, 0], [face_x, 0, 0], [face_x, face_y, 0], [0, face_y, 0]], dtype=np.float32)
+            _, rvec, tvec = cv2.solvePnP(obj_pts, img_pts, intrinsic, distortion)
+            cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
+            cv2.putText(frame, f'{tvec[2][0]}', (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+
+        cv2.imshow('drone', frame)
+        key = cv2.waitKey(50)
+        if key != -1:
+            keyboard(drone, key)
+        elif face_rects is not None and tvec is not None:
+            (x_err, y_err, z_err) = tvec[:,0]
+            z_err = z_err - z_dist
+            x_err = x_err * 2
+            y_err = - (y_err + 10) * 2
+
+            R, err = cv2.Rodrigues(np.array([rvec[:,0]]))
+            # print("err:", err)
+            V = np.matmul(R, [0, 0, 1])
+            rad = math.atan(V[0]/V[2])
+            deg = rad / math.pi * 180
+            # print(deg)
+            yaw_err = yaw_pid.update(deg, sleep=0)
+            
+            x_err = x_pid.update(x_err, sleep=0)
+            y_err = y_pid.update(y_err, sleep=0)
+            z_err = z_pid.update(z_err, sleep=0)
+            yaw_err = yaw_pid.update(yaw_err, sleep=0)
+
+            print("errs:", x_err, y_err, z_err, yaw_err)
+            if abs(z_err) <= 1000 and abs(y_err) <= 1000 and abs(x_err) <= 1000:
+                print("Saw face!")
+                cv2.destroyAllWindows()
+                return
 
 def main():
     drone = Tello()
@@ -407,9 +472,11 @@ def main():
             keyboard(drone, key)
     
     # 1. 飛到人臉前，飛過板子，看到第二張人臉，飛過桌子底下
-    see_face(drone, face_cascade, 60)
+    see_face_f(drone, face_cascade, 60)
+
+    drone.move("forward", 50)
     drone.move("up", 60)
-    drone.move("forward", 310)
+    drone.move("forward", 300)
     drone.move("down", 70)
     # drone.move("forward", 130)
 
