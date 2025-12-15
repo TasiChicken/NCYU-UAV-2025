@@ -155,7 +155,7 @@ def trace_line(drone, speed_output, target_square, horizontal_trace=False, targe
             drone.send_rc_control(lr, fb, ud, rot)
     drone.send_rc_control(0,0,0,0)
 
-def post_trace_till_marker(drone, frame, left_speed=-20):
+def post_trace_till_marker(drone, frame, left_speed=-20,):
     frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     gray = cv2.GaussianBlur(gray, (5, 5), 0)
@@ -163,13 +163,13 @@ def post_trace_till_marker(drone, frame, left_speed=-20):
 
     detected_squares, black_ratio = line_follower(gray)
     lr, fb, ud, rot = [left_speed,0,0,0]
-    if horizontal_trace and detected_squares[:3] == [1,1,1]:
+    if detected_squares[:3] == [1,1,1]:
         ud += 3
-    elif horizontal_trace and  detected_squares[-3:] == [1,1,1]:
+    elif  detected_squares[-3:] == [1,1,1]:
         ud -= 3
-    elif not horizontal_trace and detected_squares[::3] == [1,1,1]:
+    elif not detected_squares[::3] == [1,1,1]:
         lr -= 3
-    elif not horizontal_trace and detected_squares[2::3] == [1,1,1]:
+    elif not detected_squares[2::3] == [1,1,1]:
         lr += 3
 
     if detected_squares == [0,0,0,0,0,0,0,0,0]:
@@ -256,7 +256,7 @@ def see(drone, markId):
             rv = int(mss(yaw_err, 50))
             # print(xv, yv, zv, rv)
             # drone.send_rc_control(min(20, int(xv//2)), min(20, int(zv//2)), min(20, int(yv//2)), 0)
-            if abs(z_err) <= 20 and abs(y_err) <= 50 and abs(x_err) <= 50 and abs(yaw_err) <= 20:
+            if abs(z_err) <= 15 and abs(y_err) <= 40 and abs(x_err) <= 50 and abs(yaw_err) <= 20:
                 print("Saw marker", markId)
                 drone.send_rc_control(0, 0, 0, 0)
                 cv2.destroyAllWindows()
@@ -612,7 +612,7 @@ def main():
     print("Rotating 90 CCW...")
     drone.rotate_counter_clockwise(90)
 
-    drone.move("back", 40)
+    drone.move("back", 100)
 
     # 2. 辨識娃娃
     print("Detecting Doll...")

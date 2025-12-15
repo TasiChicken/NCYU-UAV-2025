@@ -84,7 +84,7 @@ def see_face(drone, face_cascade, z_dist=40):
             rv = mss(yaw_err)
             # print(xv, yv, zv, rv)
             # drone.send_rc_control(min(20, int(xv)), min(20, int(zv//2)), min(20, int(yv//2)), 0)
-            if abs(z_err) <= 30 and abs(y_err) <= 15 and abs(x_err) <= 15:
+            if abs(z_err) <= 30 and abs(y_err) <= 15 and abs(x_err) <= 15 and abs(yaw_err)<=15 :
                 print("Saw face!")
                 cv2.destroyAllWindows()
                 return
